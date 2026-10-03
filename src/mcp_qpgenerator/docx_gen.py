@@ -8,7 +8,7 @@ from docx import Document
 from docx.shared import Pt, RGBColor, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
-from .paper import QuestionPaper, Question, Section
+from mcp_qpgenerator.paper import QuestionPaper, Question, Section
 
 
 def _add_heading(doc: Document, text: str, size: int = 18, bold: bool = True) -> None:

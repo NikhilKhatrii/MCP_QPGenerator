@@ -3,21 +3,28 @@
 from __future__ import annotations
 
 import base64
+import sys
 from pathlib import Path
 from typing import Any
 
+# Allow this file to be loaded directly (e.g. `fastmcp run server.py` or by
+# FastMCP Cloud) as well as imported as part of the package.
+_SRC = str(Path(__file__).resolve().parent.parent)
+if _SRC not in sys.path:
+    sys.path.insert(0, _SRC)
+
 from fastmcp import FastMCP
 
-from .paper import (
+from mcp_qpgenerator.paper import (
     QuestionPaper,
     build_markdown,
     paper_from_json,
     paper_to_markdown_file,
     parse_markdown,
 )
-from .docx_gen import paper_to_docx
-from .gmail import share_docx
-from .secrets import get_gmail_address, get_gmail_app_password
+from mcp_qpgenerator.docx_gen import paper_to_docx
+from mcp_qpgenerator.gmail import share_docx
+from mcp_qpgenerator.secrets import get_gmail_address, get_gmail_app_password
 
 mcp = FastMCP("Question Paper Generator")
 
@@ -68,14 +75,39 @@ def _build_paper(
         duration=duration,
         max_marks=max_marks,
     )
+
+    def _q(item: dict[str, Any]) -> Any:
+        from mcp_qpgenerator.paper import Question
+
+        num = int(item.get("number", 0)) if item.get("number") is not None else 0
+        marks = item.get("marks")
+        marks = int(marks) if marks is not None and str(marks).strip() else None
+        return Question(number=num, text=str(item.get("text", "")).strip(), marks=marks)
+
     for q in questions or []:
-        paper.questions.append(
-            _question(q.get("number"), q.get("text", ""), q.get("marks"))
-        )
+        paper.questions.append(_q(q))
     for sec in sections or []:
-        paper.sections.append(_section(sec.get("section", ""), sec.get("questions", [])))
-    _autonumber(paper)
+        from mcp_qpgenerator.paper import Section
+
+        section = Section(name=str(sec.get("section", "")))
+        for q in sec.get("questions", []):
+            section.questions.append(_q(q))
+        paper.sections.append(section)
+    _renumber(paper)
     return paper
+
+
+def _renumber(paper: QuestionPaper) -> None:
+    n = 1
+    for sec in paper.sections:
+        for q in sec.questions:
+            if not q.number:
+                q.number = n
+            n += 1
+    for q in paper.questions:
+        if not q.number:
+            q.number = n
+        n += 1
 
 
 @mcp.tool
@@ -181,29 +213,6 @@ def send_docx_email(
         token_path=token_path,
         auth=auth,
     )
-
-
-def _question(number: Any, text: str, marks: Any) -> Any:
-    from .paper import Question
-
-    num = int(number) if number is not None else 0
-    m = int(marks) if marks is not None and str(marks).strip() else None
-    return Question(number=num, text=str(text).strip(), marks=m)
-
-
-def _section(name: str, items: list[dict[str, Any]]) -> Any:
-    from .paper import Section
-
-    sec = Section(name=str(name))
-    for q in items:
-        sec.questions.append(_question(q.get("number"), q.get("text", ""), q.get("marks")))
-    return sec
-
-
-def _autonumber(paper: QuestionPaper) -> None:
-    from .paper import _autonumber as _a
-
-    _a(paper)
 
 
 def _paper_to_dict(paper: QuestionPaper) -> dict[str, Any]:

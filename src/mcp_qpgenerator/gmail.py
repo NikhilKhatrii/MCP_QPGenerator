@@ -12,7 +12,7 @@ from email.mime.text import MIMEText
 from pathlib import Path
 from typing import Any
 
-from .paper import QuestionPaper
+from mcp_qpgenerator.paper import QuestionPaper
 
 
 def _build_message(
