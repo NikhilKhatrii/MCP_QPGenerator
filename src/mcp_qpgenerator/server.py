@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -89,7 +90,8 @@ def _build_paper(
     for sec in sections or []:
         from mcp_qpgenerator.paper import Section
 
-        section = Section(name=str(sec.get("section", "")))
+        name = str(sec.get("title") or sec.get("section") or sec.get("name") or "")
+        section = Section(name=name, instructions=str(sec.get("instructions", "") or ""))
         for q in sec.get("questions", []):
             section.questions.append(_q(q))
         paper.sections.append(section)
@@ -122,13 +124,15 @@ def question_paper_to_markdown(
     max_marks: str = "",
     questions: list[dict[str, Any]] | None = None,
     sections: list[dict[str, Any]] | None = None,
-    output_path: str = "question_paper.md",
+    output_path: str = "",
 ) -> dict[str, Any]:
     """Create a .md question-paper file and return its path and content."""
     paper = _build_paper(
         college_name, subject, exam, program, date, time,
         duration, max_marks, questions, sections,
     )
+    if not output_path:
+        output_path = str(Path(tempfile.gettempdir()) / "question_paper.md")
     path = paper_to_markdown_file(paper, output_path)
     return {"path": path, "content": build_markdown(paper)}
 
@@ -145,13 +149,21 @@ def question_paper_to_docx(
     max_marks: str = "",
     questions: list[dict[str, Any]] | None = None,
     sections: list[dict[str, Any]] | None = None,
-    output_path: str = "question_paper.docx",
+    output_path: str = "",
 ) -> dict[str, Any]:
-    """Generate a .docx question paper and return its path."""
+    """Generate a .docx question paper and return its path and base64 bytes.
+
+    If output_path is empty, the file is written to a temporary directory so
+    the tool works even on read-only filesystems.
+    """
     paper = _build_paper(
         college_name, subject, exam, program, date, time,
         duration, max_marks, questions, sections,
     )
+    if not output_path:
+        output_path = str(
+            Path(tempfile.gettempdir()) / "question_paper.docx"
+        )
     path = paper_to_docx(paper, output_path)
     return {"path": path, "docx_b64": base64.b64encode(Path(path).read_bytes()).decode()}
 
@@ -159,10 +171,12 @@ def question_paper_to_docx(
 @mcp.tool
 def markdown_to_docx(
     markdown: str,
-    output_path: str = "question_paper.docx",
+    output_path: str = "",
 ) -> dict[str, Any]:
     """Convert a Markdown question paper into a .docx file."""
     paper = parse_markdown(markdown)
+    if not output_path:
+        output_path = str(Path(tempfile.gettempdir()) / "question_paper.docx")
     path = paper_to_docx(paper, output_path)
     return {"path": path, "docx_b64": base64.b64encode(Path(path).read_bytes()).decode()}
 
@@ -215,6 +229,64 @@ def send_docx_email(
     )
 
 
+@mcp.tool
+def generate_and_email_paper(
+    recipients: list[str],
+    college_name: str = "",
+    subject: str = "",
+    exam: str = "",
+    program: str = "",
+    date: str = "",
+    time: str = "",
+    duration: str = "",
+    max_marks: str = "",
+    questions: list[dict[str, Any]] | None = None,
+    sections: list[dict[str, Any]] | None = None,
+    attachment_name: str = "question_paper.docx",
+    email_subject: str = "Question Paper",
+    body: str = "Please find attached the question paper.",
+    sender: str = "",
+    smtp_server: str = "smtp.gmail.com",
+    smtp_port: int = 587,
+    username: str = "",
+    password: str = "",
+    use_smtp: bool = True,
+    token_path: str = "token.json",
+    auth: bool = True,
+) -> dict[str, Any]:
+    """Build a question paper, render it to .docx in memory, and email it.
+
+    No temp file is written, so this works in sandboxes where /tmp is
+    read-only or ephemeral. Credentials default to GMAIL_ADDRESS /
+    GMAIL_APP_PASSWORD from the environment.
+    """
+    paper = _build_paper(
+        college_name, subject, exam, program, date, time,
+        duration, max_marks, questions, sections,
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        path = paper_to_docx(paper, str(Path(tmp) / attachment_name))
+        docx_bytes = Path(path).read_bytes()
+    username = username or get_gmail_address()
+    password = password or get_gmail_app_password()
+    sender = sender or username
+    return share_docx(
+        recipients=recipients,
+        attachment_bytes=docx_bytes,
+        attachment_name=attachment_name,
+        subject=email_subject,
+        body=body,
+        sender=sender,
+        smtp_server=smtp_server,
+        smtp_port=smtp_port,
+        username=username,
+        password=password,
+        use_smtp=use_smtp,
+        token_path=token_path,
+        auth=auth,
+    )
+
+
 def _paper_to_dict(paper: QuestionPaper) -> dict[str, Any]:
     return {
         "college_name": paper.college_name,
@@ -232,6 +304,7 @@ def _paper_to_dict(paper: QuestionPaper) -> dict[str, Any]:
         "sections": [
             {
                 "section": s.name,
+                "instructions": s.instructions,
                 "questions": [
                     {"number": q.number, "text": q.text, "marks": q.marks}
                     for q in s.questions

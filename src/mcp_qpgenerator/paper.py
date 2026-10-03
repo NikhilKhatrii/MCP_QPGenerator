@@ -19,6 +19,7 @@ class Question:
 @dataclass
 class Section:
     name: str
+    instructions: str = ""
     questions: list[Question] = field(default_factory=list)
 
 
@@ -133,6 +134,9 @@ def build_markdown(paper: QuestionPaper) -> str:
             if section.name:
                 lines.append(f"### {section.name}")
                 lines.append("")
+            if section.instructions:
+                lines.append(f"*{section.instructions}*")
+                lines.append("")
             for q in section.questions:
                 marks = f" [{q.marks} Marks]" if q.marks is not None else ""
                 lines.append(f"{q.number}. {q.text}{marks}")
@@ -172,6 +176,9 @@ def parse_markdown(text: str) -> QuestionPaper:
         if line.startswith("### "):
             current_section = Section(name=line[4:].strip())
             paper.sections.append(current_section)
+            continue
+        if line.startswith("*") and line.endswith("*") and current_section is not None:
+            current_section.instructions = line.strip("*").strip()
             continue
         if line.startswith("## "):
             paper.subject = line[3:].strip()

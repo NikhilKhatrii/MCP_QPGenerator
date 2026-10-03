@@ -125,8 +125,10 @@ def share_docx(
     if not recipients:
         raise ValueError("At least one recipient email address is required.")
 
+    username = username or os.environ.get("GMAIL_ADDRESS", "")
+    password = password or os.environ.get("GMAIL_APP_PASSWORD", "")
     if not sender:
-        sender = username or os.environ.get("GMAIL_ADDRESS", "")
+        sender = username
 
     if not auth and not use_smtp:
         raise ValueError("auth=False only applies to the SMTP path.")
