@@ -42,10 +42,8 @@ def _add_question(doc: Document, q: Question, number: int) -> None:
         p.add_run(f"   [{q.marks} Marks]")
 
 
-def paper_to_docx(paper: QuestionPaper, path: str | Path) -> str:
-    """Render a QuestionPaper to a .docx file and return the resolved path."""
+def _render(paper: QuestionPaper) -> Document:
     doc = Document()
-
     if paper.college_name:
         _add_heading(doc, paper.college_name, size=22)
     if paper.subject:
@@ -79,6 +77,22 @@ def paper_to_docx(paper: QuestionPaper, path: str | Path) -> str:
         for i, q in enumerate(paper.questions, start=1):
             _add_question(doc, q, i)
 
+    return doc
+
+
+def paper_to_docx_bytes(paper: QuestionPaper) -> bytes:
+    """Render a QuestionPaper to .docx bytes without touching the filesystem."""
+    import io
+
+    doc = _render(paper)
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+def paper_to_docx(paper: QuestionPaper, path: str | Path) -> str:
+    """Render a QuestionPaper to a .docx file and return the resolved path."""
+    doc = _render(paper)
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
     doc.save(str(out))

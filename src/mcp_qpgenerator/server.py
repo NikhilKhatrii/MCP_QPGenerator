@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import base64
 import sys
-import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -19,39 +18,14 @@ from fastmcp import FastMCP
 from mcp_qpgenerator.paper import (
     QuestionPaper,
     build_markdown,
-    paper_from_json,
     paper_to_markdown_file,
     parse_markdown,
 )
-from mcp_qpgenerator.docx_gen import paper_to_docx
+from mcp_qpgenerator.docx_gen import paper_to_docx, paper_to_docx_bytes
 from mcp_qpgenerator.gmail import share_docx
 from mcp_qpgenerator.secrets import get_gmail_address, get_gmail_app_password
 
 mcp = FastMCP("Question Paper Generator")
-
-
-@mcp.tool
-def generate_question_paper(
-    college_name: str = "",
-    subject: str = "",
-    exam: str = "",
-    program: str = "",
-    date: str = "",
-    time: str = "",
-    duration: str = "",
-    max_marks: str = "",
-    questions: list[dict[str, Any]] | None = None,
-    sections: list[dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    """Build a QuestionPaper object from metadata and questions.
-
-    Provide a flat list of questions OR a list of sections (each with its own
-    questions). Each question is {"number": 1, "text": "...", "marks": 5}.
-    """
-    return _paper_to_dict(
-        _build_paper(college_name, subject, exam, program, date, time,
-                     duration, max_marks, questions, sections)
-    )
 
 
 def _build_paper(
@@ -126,15 +100,20 @@ def question_paper_to_markdown(
     sections: list[dict[str, Any]] | None = None,
     output_path: str = "",
 ) -> dict[str, Any]:
-    """Create a .md question-paper file and return its path and content."""
+    """Create a .md question paper.
+
+    The Markdown text is returned directly, so no filesystem write is needed.
+    If output_path is given, the file is also written there.
+    """
     paper = _build_paper(
         college_name, subject, exam, program, date, time,
         duration, max_marks, questions, sections,
     )
-    if not output_path:
-        output_path = str(Path(tempfile.gettempdir()) / "question_paper.md")
-    path = paper_to_markdown_file(paper, output_path)
-    return {"path": path, "content": build_markdown(paper)}
+    content = build_markdown(paper)
+    path = None
+    if output_path:
+        path = paper_to_markdown_file(paper, output_path)
+    return {"path": path, "content": content}
 
 
 @mcp.tool
@@ -151,21 +130,21 @@ def question_paper_to_docx(
     sections: list[dict[str, Any]] | None = None,
     output_path: str = "",
 ) -> dict[str, Any]:
-    """Generate a .docx question paper and return its path and base64 bytes.
+    """Generate a .docx question paper.
 
-    If output_path is empty, the file is written to a temporary directory so
-    the tool works even on read-only filesystems.
+    The docx is built in memory and returned as base64, so no filesystem
+    write is needed and the tool works on read-only sandboxes. If
+    output_path is given, the file is also written there.
     """
     paper = _build_paper(
         college_name, subject, exam, program, date, time,
         duration, max_marks, questions, sections,
     )
-    if not output_path:
-        output_path = str(
-            Path(tempfile.gettempdir()) / "question_paper.docx"
-        )
-    path = paper_to_docx(paper, output_path)
-    return {"path": path, "docx_b64": base64.b64encode(Path(path).read_bytes()).decode()}
+    docx_b64 = base64.b64encode(paper_to_docx_bytes(paper)).decode()
+    path = None
+    if output_path:
+        path = paper_to_docx(paper, output_path)
+    return {"path": path, "docx_b64": docx_b64}
 
 
 @mcp.tool
@@ -175,10 +154,11 @@ def markdown_to_docx(
 ) -> dict[str, Any]:
     """Convert a Markdown question paper into a .docx file."""
     paper = parse_markdown(markdown)
-    if not output_path:
-        output_path = str(Path(tempfile.gettempdir()) / "question_paper.docx")
-    path = paper_to_docx(paper, output_path)
-    return {"path": path, "docx_b64": base64.b64encode(Path(path).read_bytes()).decode()}
+    docx_b64 = base64.b64encode(paper_to_docx_bytes(paper)).decode()
+    path = None
+    if output_path:
+        path = paper_to_docx(paper, output_path)
+    return {"path": path, "docx_b64": docx_b64}
 
 
 @mcp.tool
@@ -264,9 +244,7 @@ def generate_and_email_paper(
         college_name, subject, exam, program, date, time,
         duration, max_marks, questions, sections,
     )
-    with tempfile.TemporaryDirectory() as tmp:
-        path = paper_to_docx(paper, str(Path(tmp) / attachment_name))
-        docx_bytes = Path(path).read_bytes()
+    docx_bytes = paper_to_docx_bytes(paper)
     username = username or get_gmail_address()
     password = password or get_gmail_app_password()
     sender = sender or username
@@ -285,34 +263,6 @@ def generate_and_email_paper(
         token_path=token_path,
         auth=auth,
     )
-
-
-def _paper_to_dict(paper: QuestionPaper) -> dict[str, Any]:
-    return {
-        "college_name": paper.college_name,
-        "subject": paper.subject,
-        "exam": paper.exam,
-        "program": paper.program,
-        "date": paper.date,
-        "time": paper.time,
-        "duration": paper.duration,
-        "max_marks": paper.max_marks,
-        "questions": [
-            {"number": q.number, "text": q.text, "marks": q.marks}
-            for q in paper.questions
-        ],
-        "sections": [
-            {
-                "section": s.name,
-                "instructions": s.instructions,
-                "questions": [
-                    {"number": q.number, "text": q.text, "marks": q.marks}
-                    for q in s.questions
-                ],
-            }
-            for s in paper.sections
-        ],
-    }
 
 
 def main() -> None:
