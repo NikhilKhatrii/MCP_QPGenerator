@@ -1,19 +1,33 @@
 # MCP Question Paper Generator
 
-A FastMCP server that builds college question papers and shares them.
+A FastMCP server with three tools for building college question papers and
+emailing them.
 
 ## Tools
 
-| Tool | Description |
+| Tool | What it does |
 |---|---|
-| `generate_question_paper` | Build a paper object from metadata + questions/sections |
-| `question_paper_to_markdown` | Create a `.md` question paper (college name, subject, exam, sections) |
-| `question_paper_to_docx` | Generate a `.docx` question paper |
-| `markdown_to_docx` | Convert an existing `.md` paper into a `.docx` |
-| `send_docx_email` | Email the `.docx` to one or more recipients |
+| `create_question_paper_markdown` | Fill a paper model (college, subject, exam, questions) and get Markdown back |
+| `markdown_to_docx` | Convert Markdown text to a .docx file (via the `markdown2docx` library) |
+| `send_docx_email` | Email a .docx to one or more recipients |
 
-The intended pipeline is `.md` → `.docx`: write the paper as Markdown, then
-convert it, so the formatting is easy to inspect before generating Word.
+## Pipeline
+
+```text
+metadata + questions
+        │
+        ▼
+create_question_paper_markdown ──► Markdown text
+        │
+        ▼
+markdown_to_docx ──► .docx (base64)
+        │
+        ▼
+send_docx_email ──► sent to recipients
+```
+
+The docx is built in memory, so no filesystem write is needed and the tools
+work on read-only sandboxes.
 
 ## Install
 
@@ -27,13 +41,9 @@ uv sync
 uv run fastmcp dev inspector -m mcp_qpgenerator.server --ui-port 6276 --server-port 6277
 ```
 
-This starts the MCP Inspector and opens `http://127.0.0.1:6276` in your
-browser automatically, with all five tools available in the UI.
+Opens `http://127.0.0.1:6276` in your browser with all three tools.
 
-The `--ui-port` / `--server-port` flags avoid the default ports (6274/6275)
-being occupied by a previous run.
-
-## Usage example
+## Usage
 
 ```json
 {
@@ -47,9 +57,11 @@ being occupied by a previous run.
   "max_marks": "50",
   "sections": [
     {
-      "section": "Section A",
+      "section": "A",
+      "instructions": "Answer all questions.",
       "questions": [
-        { "number": 1, "text": "Define derivative.", "marks": 2 }
+        { "text": "Define derivative.", "marks": 2 },
+        { "text": "State Pythagoras theorem.", "marks": 2 }
       ]
     }
   ]
@@ -58,18 +70,11 @@ being occupied by a previous run.
 
 ## Emailing
 
-`send_docx_email` sends the `.docx` to one or more recipients.
+`send_docx_email` accepts a file path, raw bytes, or the base64 returned by
+`markdown_to_docx`. Credentials default to `GMAIL_ADDRESS` and
+`GMAIL_APP_PASSWORD` from the environment. Locally they come from a gitignored
+`.env` file; on FastMCP Cloud set them in the platform's Secrets UI.
 
-- **SMTP with auth (default)** — `smtp.gmail.com:587`, username + password
-  (for Gmail use an **App Password**). Change `smtp_server`/`smtp_port` for
-  any other provider.
-- **Gmail API** — `use_smtp=false` with an OAuth `token.json`.
-- **No auth** — `auth=false`, connects to a local SMTP MTA without credentials
-  (e.g. Postfix on `localhost:25`).
-
-### Credentials
-
-`GMAIL_ADDRESS` and `GMAIL_APP_PASSWORD` come from the environment. Locally
-they are loaded from a gitignored `.env` file. On FastMCP Cloud (or any host)
-set the same two variables in the platform's Secrets UI — the repo never
-contains them.
+- SMTP auth (default) — `smtp.gmail.com:587` with a Gmail App Password
+- `use_smtp=false` — Gmail API with an OAuth `token.json`
+- `auth=false` — no credentials, for a local MTA (e.g. Postfix on localhost:25)

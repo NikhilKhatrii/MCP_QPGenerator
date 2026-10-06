@@ -91,11 +91,12 @@ def paper_from_json(data: Any) -> QuestionPaper:
         else:
             paper.questions.append(_question_from_dict(item))
 
-    _autonumber(paper)
+    renumber(paper)
     return paper
 
 
-def _autonumber(paper: QuestionPaper) -> None:
+def renumber(paper: QuestionPaper) -> None:
+    """Assign sequential numbers to questions that have none."""
     counter = 1
     for sec in paper.sections:
         for q in sec.questions:
