@@ -1,14 +1,17 @@
 """FastMCP server: three tools for building and sharing question papers.
 
-1. create_question_paper_markdown - fill a pydantic model and return Markdown
-2. markdown_to_docx - convert Markdown text to a .docx file
-3. send_docx_email - email a .docx to one or more recipients
+1. create_question_paper_markdown - fill a pydantic model and write Markdown
+2. markdown_to_docx - convert a Markdown file into a .docx file
+3. send_docx_email - email a .docx file to one or more recipients
+
+Every tool writes its output to disk and returns the path, so the LLM never
+has to carry large base64 payloads between calls.
 """
 
 from __future__ import annotations
 
-import base64
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -26,11 +29,14 @@ from mcp_qpgenerator.paper import (
     build_markdown,
     paper_to_markdown_file,
 )
-from mcp_qpgenerator.md2docx import markdown_to_docx_bytes as md_to_docx
+from mcp_qpgenerator.md2docx import markdown_to_docx as _md_to_docx
 from mcp_qpgenerator.gmail import share_docx
 from mcp_qpgenerator.secrets import get_gmail_address, get_gmail_app_password
 
 mcp = FastMCP("Question Paper Generator")
+
+_DEFAULT_DIR = Path(tempfile.gettempdir()) / "mcp_qpgenerator"
+_DEFAULT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 @mcp.tool
@@ -47,13 +53,14 @@ def create_question_paper_markdown(
     sections: list[dict[str, Any]] | None = None,
     output_path: str = "",
 ) -> dict[str, Any]:
-    """Build a question paper from metadata + questions and return Markdown.
+    """Build a question paper from metadata + questions and write Markdown.
 
     Fill in the college/subject/exam fields and the questions. Each question
-    is {"number": 1, "text": "...", "marks": 5}. Group questions into sections
-    with {"section": "A", "instructions": "...", "questions": [...]}.
+    is {"text": "...", "marks": 5}. Group questions into sections with
+    {"section": "A", "instructions": "...", "questions": [...]}.
 
-    The Markdown text is returned directly; pass output_path to also write it.
+    The paper is written to a .md file and its path returned, along with the
+    Markdown text for quick preview. Pass output_path to choose the location.
     """
     paper = QuestionPaper(
         college_name=college_name,
@@ -81,45 +88,47 @@ def create_question_paper_markdown(
         from mcp_qpgenerator.paper import Section
 
         name = str(sec.get("section") or sec.get("title") or sec.get("name") or "")
-        section = Section(name=name, instructions=str(sec.get("instructions", "") or ""))
+        section = Section(
+            name=name,
+            instructions=str(sec.get("instructions", "") or ""),
+        )
         for q in sec.get("questions", []):
             section.questions.append(_q(q))
         paper.sections.append(section)
     renumber(paper)
 
     content = build_markdown(paper)
-    path = None
-    if output_path:
-        path = paper_to_markdown_file(paper, output_path)
+    if not output_path:
+        output_path = str(_DEFAULT_DIR / "question_paper.md")
+    path = paper_to_markdown_file(paper, output_path)
     return {"path": path, "content": content}
 
 
 @mcp.tool
 def markdown_to_docx(
-    markdown: str,
+    markdown_path: str = "",
+    markdown: str = "",
     output_path: str = "",
 ) -> dict[str, Any]:
-    """Convert Markdown text into a .docx file.
+    """Convert a Markdown file into a .docx file and return its path.
 
-    Uses the markdown2docx library, so no regex parsing is needed. The docx
-    is built in memory and returned as base64; pass output_path to also write
-    it to disk.
+    Pass markdown_path (a .md file on disk) or raw markdown text. The docx is
+    written to disk and its path returned.
     """
-    docx_b64 = base64.b64encode(md_to_docx(markdown)).decode()
-    path = None
-    if output_path:
-        from mcp_qpgenerator.md2docx import markdown_to_docx_file
-
-        path = markdown_to_docx_file(markdown, output_path)
-    return {"path": path, "docx_b64": docx_b64}
+    if markdown_path:
+        text = Path(markdown_path).read_text(encoding="utf-8")
+    else:
+        text = markdown
+    if not output_path:
+        output_path = str(_DEFAULT_DIR / "question_paper.docx")
+    path = _md_to_docx(text, output_path)
+    return {"path": path, "size": Path(path).stat().st_size}
 
 
 @mcp.tool
 def send_docx_email(
     recipients: list[str],
-    docx_path: str | None = None,
-    docx_bytes: bytes | None = None,
-    docx_b64: str | None = None,
+    docx_path: str,
     attachment_name: str = "question_paper.docx",
     subject: str = "Question Paper",
     body: str = "Please find attached the question paper.",
@@ -132,25 +141,21 @@ def send_docx_email(
     token_path: str = "token.json",
     auth: bool = True,
 ) -> dict[str, Any]:
-    """Email a .docx question paper to one or more recipients.
+    """Email a .docx file to one or more recipients.
 
-    Pass a file path, raw bytes, or base64 (the output of markdown_to_docx).
-    Credentials default to GMAIL_ADDRESS / GMAIL_APP_PASSWORD from the
-    environment (set them in the FastMCP Cloud Secrets UI, or in a local
-    .env file which is gitignored).
+    Pass the path returned by markdown_to_docx. Credentials default to
+    GMAIL_ADDRESS / GMAIL_APP_PASSWORD from the environment (set them in the
+    FastMCP Cloud Secrets UI, or in a local .env file which is gitignored).
 
     SMTP auth is the default (Gmail App Password). Set use_smtp=False for the
     Gmail API with an OAuth token, or auth=False for a local MTA.
     """
-    if docx_b64 and docx_bytes is None:
-        docx_bytes = base64.b64decode(docx_b64)
     username = username or get_gmail_address()
     password = password or get_gmail_app_password()
     sender = sender or username
     return share_docx(
         recipients=recipients,
         attachment_path=docx_path,
-        attachment_bytes=docx_bytes,
         attachment_name=attachment_name,
         subject=subject,
         body=body,

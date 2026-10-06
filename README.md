@@ -1,15 +1,16 @@
 # MCP Question Paper Generator
 
 A FastMCP server with three tools for building college question papers and
-emailing them.
+emailing them. Every tool writes its output to disk and returns the path, so
+the LLM never has to carry large base64 payloads between calls.
 
 ## Tools
 
 | Tool | What it does |
 |---|---|
-| `create_question_paper_markdown` | Fill a paper model (college, subject, exam, questions) and get Markdown back |
-| `markdown_to_docx` | Convert Markdown text to a .docx file (via the `markdown2docx` library) |
-| `send_docx_email` | Email a .docx to one or more recipients |
+| `create_question_paper_markdown` | Fill a paper model (college, subject, exam, questions) and write a `.md` file |
+| `markdown_to_docx` | Convert a `.md` file into a `.docx` file (via the `markdown2docx` library) |
+| `send_docx_email` | Email a `.docx` file to one or more recipients |
 
 ## Pipeline
 
@@ -17,17 +18,17 @@ emailing them.
 metadata + questions
         │
         ▼
-create_question_paper_markdown ──► Markdown text
+create_question_paper_markdown ──► question_paper.md  (path returned)
         │
         ▼
-markdown_to_docx ──► .docx (base64)
+markdown_to_docx ──► question_paper.docx  (path returned)
         │
         ▼
 send_docx_email ──► sent to recipients
 ```
 
-The docx is built in memory, so no filesystem write is needed and the tools
-work on read-only sandboxes.
+Files are written under `tempfile.gettempdir()/mcp_qpgenerator/` by default;
+pass `output_path` to choose another location.
 
 ## Install
 
@@ -68,12 +69,15 @@ Opens `http://127.0.0.1:6276` in your browser with all three tools.
 }
 ```
 
+Use either `questions` (flat list) or `sections` (grouped). Each question needs
+a `text` string and an optional `marks` number.
+
 ## Emailing
 
-`send_docx_email` accepts a file path, raw bytes, or the base64 returned by
-`markdown_to_docx`. Credentials default to `GMAIL_ADDRESS` and
-`GMAIL_APP_PASSWORD` from the environment. Locally they come from a gitignored
-`.env` file; on FastMCP Cloud set them in the platform's Secrets UI.
+`send_docx_email` takes the path returned by `markdown_to_docx`. Credentials
+default to `GMAIL_ADDRESS` and `GMAIL_APP_PASSWORD` from the environment.
+Locally they come from a gitignored `.env` file; on FastMCP Cloud set them in
+the platform's Secrets UI.
 
 - SMTP auth (default) — `smtp.gmail.com:587` with a Gmail App Password
 - `use_smtp=false` — Gmail API with an OAuth `token.json`
