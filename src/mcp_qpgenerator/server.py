@@ -2,8 +2,7 @@
 MCP Question Paper Generator
 Tools:
   1. generate_question_paper  - Builds a Markdown question paper from structured inputs
-  2. convert_to_docx          - Converts the Markdown file to a .docx file via Spire.Doc
-  3. send_email               - Emails the .docx file to one or more recipients
+  2. send_email               - Converts the .md to .docx and emails it to recipients
 """
 
 import os
@@ -148,56 +147,24 @@ def generate_question_paper(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# TOOL 2 – Convert Markdown → DOCX using Spire.Doc
-# ─────────────────────────────────────────────────────────────────────────────
-@mcp.tool()
-def convert_to_docx(markdown_file_path: str) -> str:
-    """
-    Convert a Markdown question paper file to a .docx file using Spire.Doc.
-
-    Parameters
-    ----------
-    markdown_file_path : str
-        Absolute path to the .md file produced by generate_question_paper.
-
-    Returns
-    -------
-    str
-        Absolute path to the generated .docx file.
-    """
-    md_path = pathlib.Path(markdown_file_path)
-    if not md_path.exists():
-        raise FileNotFoundError(f"Markdown file not found: {markdown_file_path}")
-
-    docx_path = md_path.with_suffix(".docx")
-
-    document = Document()
-    document.LoadFromFile(str(md_path))
-    document.SaveToFile(str(docx_path), FileFormat.Docx)
-    document.Close()
-
-    return str(docx_path)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# TOOL 3 – Send email with DOCX attachment
+# TOOL 2 – Convert Markdown → DOCX and email it
 # ─────────────────────────────────────────────────────────────────────────────
 @mcp.tool()
 def send_email(
-    docx_file_path: str,
+    markdown_file_path: str,
     recipients: list[str],
     subject: str = "Question Paper",
     body: str = "Please find the attached question paper.",
 ) -> str:
     """
-    Email the DOCX question paper to one or more recipients via Gmail.
+    Convert the Markdown question paper to DOCX and email it to recipients.
 
     Parameters
     ----------
-    docx_file_path : str
-        Absolute path to the .docx file to attach.
+    markdown_file_path : str
+        Absolute path to the .md file produced by generate_question_paper.
     recipients : list[str]
-        List of email addresses to send to.
+        List of recipient email addresses.
     subject : str
         Email subject line.
     body : str
@@ -211,20 +178,27 @@ def send_email(
     gmail_address = os.environ["GMAIL_ADDRESS"]
     gmail_password = os.environ["GMAIL_APP_PASSWORD"]
 
-    docx_path = pathlib.Path(docx_file_path)
-    if not docx_path.exists():
-        raise FileNotFoundError(f"DOCX file not found: {docx_file_path}")
+    md_path = pathlib.Path(markdown_file_path)
+    if not md_path.exists():
+        raise FileNotFoundError(f"Markdown file not found: {markdown_file_path}")
 
     if not recipients:
         raise ValueError("No recipients provided.")
 
+    # ── Convert .md → .docx via Spire.Doc ────────────────────────────────────
+    docx_path = md_path.with_suffix(".docx")
+    document = Document()
+    document.LoadFromFile(str(md_path))
+    document.SaveToFile(str(docx_path), FileFormat.Docx)
+    document.Close()
+
+    # ── Build and send email ──────────────────────────────────────────────────
     msg = MIMEMultipart()
     msg["From"] = gmail_address
     msg["To"] = ", ".join(recipients)
     msg["Subject"] = subject
     msg.attach(MIMEText(body, "plain"))
 
-    # Attach DOCX
     with open(docx_path, "rb") as f:
         part = MIMEBase("application", "octet-stream")
         part.set_payload(f.read())
