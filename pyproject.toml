@@ -1,5 +1,5 @@
 [project]
-name = "qpgen"
+name = "mcp_qpgenerator"
 version = "0.1.0"
 description = "MCP server to generate question papers, convert to DOCX, and email them"
 readme = "README.md"
@@ -17,7 +17,7 @@ dependencies = [
 ]
 
 [project.scripts]
-mcp-question-paper = "qpgen:main"
+mcp-question-paper = "mcp_qpgenerator:main"
 
 [build-system]
 requires = ["uv_build>=0.12.21,<0.13.0"]
