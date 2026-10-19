@@ -1,0 +1,252 @@
+"""
+MCP Question Paper Generator
+Tools:
+  1. generate_question_paper  - Builds a Markdown question paper from structured inputs
+  2. convert_to_docx          - Converts the Markdown file to a .docx file via Spire.Doc
+  3. send_email               - Emails the .docx file to one or more recipients
+"""
+
+import os
+import smtplib
+import pathlib
+from email import encoders
+from email.mime.base import MIMEBase
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
+from dotenv import load_dotenv
+from spire.doc import Document, FileFormat
+from fastmcp import FastMCP
+
+# ── Load credentials from .env ────────────────────────────────────────────────
+load_dotenv()
+GMAIL_ADDRESS = os.environ["GMAIL_ADDRESS"]
+GMAIL_APP_PASSWORD = os.environ["GMAIL_APP_PASSWORD"]
+
+# ── Output folder ─────────────────────────────────────────────────────────────
+OUTPUT_DIR = pathlib.Path(__file__).parent.parent.parent / "output"
+OUTPUT_DIR.mkdir(exist_ok=True)
+
+mcp = FastMCP("Question Paper Generator")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TOOL 1 – Generate Markdown question paper
+# ─────────────────────────────────────────────────────────────────────────────
+@mcp.tool()
+def generate_question_paper(
+    university_name: str,
+    exam_title: str,
+    subject_name: str,
+    subject_code: str,
+    course: str,
+    semester: str,
+    exam_date: str,
+    total_marks: int,
+    duration: str,
+    instructions: list[str],
+    sections: list[dict],
+) -> str:
+    """
+    Generate a professional Markdown question paper and save it to disk.
+
+    Parameters
+    ----------
+    university_name : str
+        Full name of the university / institution.
+    exam_title : str
+        E.g. "End Semester Examination" or "Mid-Term Test".
+    subject_name : str
+        Full subject name.
+    subject_code : str
+        Subject / paper code.
+    course : str
+        Degree programme, e.g. "B.Tech (Computer Science)".
+    semester : str
+        E.g. "5th Semester".
+    exam_date : str
+        Date of the exam, e.g. "November 2026".
+    total_marks : int
+        Total marks for the paper.
+    duration : str
+        Duration of the exam, e.g. "3 Hours".
+    instructions : list[str]
+        General instructions shown at the top of the paper.
+        Example: ["Attempt all questions.", "Use blue/black pen only."]
+    sections : list[dict]
+        Each section is a dict with keys:
+          - section_title (str)   : e.g. "Section A"
+          - section_marks (int)   : marks per question in this section
+          - attempt_info (str)    : e.g. "Attempt any 5 out of 8 questions"
+          - questions (list[str]) : list of question strings
+
+    Returns
+    -------
+    str
+        Absolute path to the saved Markdown file.
+    """
+    lines: list[str] = []
+
+    # ── Header ────────────────────────────────────────────────────────────────
+    lines += [
+        f"# {university_name}",
+        "",
+        f"## {exam_title}",
+        "",
+        "---",
+        "",
+        f"| **Subject**      | {subject_name} ({subject_code}) |",
+        f"| **Course**       | {course}                        |",
+        f"| **Semester**     | {semester}                      |",
+        f"| **Date**         | {exam_date}                     |",
+        f"| **Duration**     | {duration}                      |",
+        f"| **Total Marks**  | {total_marks}                   |",
+        "",
+        "---",
+        "",
+    ]
+
+    # ── General Instructions ──────────────────────────────────────────────────
+    lines += [
+        "### General Instructions",
+        "",
+    ]
+    for i, inst in enumerate(instructions, 1):
+        lines.append(f"{i}. {inst}")
+    lines += ["", "---", ""]
+
+    # ── Sections ──────────────────────────────────────────────────────────────
+    for sec in sections:
+        title = sec.get("section_title", "Section")
+        sec_marks = sec.get("section_marks", "")
+        attempt_info = sec.get("attempt_info", "")
+        questions: list[str] = sec.get("questions", [])
+
+        lines += [
+            f"## {title}",
+            "",
+        ]
+        if attempt_info:
+            lines.append(f"*{attempt_info}*")
+            lines.append("")
+        if sec_marks:
+            lines.append(f"*(Each question carries {sec_marks} marks)*")
+            lines.append("")
+
+        for q_num, question in enumerate(questions, 1):
+            lines.append(f"**Q{q_num}.** {question}")
+            lines.append("")
+
+        lines += ["---", ""]
+
+    md_content = "\n".join(lines)
+
+    # ── Save file ─────────────────────────────────────────────────────────────
+    safe_subject = subject_name.replace(" ", "_").replace("/", "-")
+    md_path = OUTPUT_DIR / f"{safe_subject}_question_paper.md"
+    md_path.write_text(md_content, encoding="utf-8")
+
+    return str(md_path)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TOOL 2 – Convert Markdown → DOCX using Spire.Doc
+# ─────────────────────────────────────────────────────────────────────────────
+@mcp.tool()
+def convert_to_docx(markdown_file_path: str) -> str:
+    """
+    Convert a Markdown question paper file to a .docx file using Spire.Doc.
+
+    Parameters
+    ----------
+    markdown_file_path : str
+        Absolute path to the .md file produced by generate_question_paper.
+
+    Returns
+    -------
+    str
+        Absolute path to the generated .docx file.
+    """
+    md_path = pathlib.Path(markdown_file_path)
+    if not md_path.exists():
+        raise FileNotFoundError(f"Markdown file not found: {markdown_file_path}")
+
+    docx_path = md_path.with_suffix(".docx")
+
+    document = Document()
+    document.LoadFromFile(str(md_path))
+    document.SaveToFile(str(docx_path), FileFormat.Docx)
+    document.Close()
+
+    return str(docx_path)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TOOL 3 – Send email with DOCX attachment
+# ─────────────────────────────────────────────────────────────────────────────
+@mcp.tool()
+def send_email(
+    docx_file_path: str,
+    recipients: list[str],
+    subject: str = "Question Paper",
+    body: str = "Please find the attached question paper.",
+) -> str:
+    """
+    Email the DOCX question paper to one or more recipients via Gmail.
+
+    Parameters
+    ----------
+    docx_file_path : str
+        Absolute path to the .docx file to attach.
+    recipients : list[str]
+        List of email addresses to send to.
+    subject : str
+        Email subject line.
+    body : str
+        Plain-text body of the email.
+
+    Returns
+    -------
+    str
+        A success message listing all recipients the email was sent to.
+    """
+    docx_path = pathlib.Path(docx_file_path)
+    if not docx_path.exists():
+        raise FileNotFoundError(f"DOCX file not found: {docx_file_path}")
+
+    if not recipients:
+        raise ValueError("No recipients provided.")
+
+    msg = MIMEMultipart()
+    msg["From"] = GMAIL_ADDRESS
+    msg["To"] = ", ".join(recipients)
+    msg["Subject"] = subject
+    msg.attach(MIMEText(body, "plain"))
+
+    # Attach DOCX
+    with open(docx_path, "rb") as f:
+        part = MIMEBase("application", "octet-stream")
+        part.set_payload(f.read())
+    encoders.encode_base64(part)
+    part.add_header(
+        "Content-Disposition",
+        f'attachment; filename="{docx_path.name}"',
+    )
+    msg.attach(part)
+
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        server.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
+        server.sendmail(GMAIL_ADDRESS, recipients, msg.as_string())
+
+    return f"Email sent successfully to: {', '.join(recipients)}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Entry point
+# ─────────────────────────────────────────────────────────────────────────────
+def main() -> None:
+    mcp.run()
+
+
+if __name__ == "__main__":
+    main()
