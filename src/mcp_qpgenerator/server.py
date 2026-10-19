@@ -21,8 +21,8 @@ from fastmcp import FastMCP
 # ── Load .env if present (local dev) ─────────────────────────────────────────
 load_dotenv()
 
-# ── Output folder ─────────────────────────────────────────────────────────────
-OUTPUT_DIR = pathlib.Path(__file__).parent.parent.parent / "output"
+# ── Output folder (/tmp is always writable in Docker; fallback for local dev) ─
+OUTPUT_DIR = pathlib.Path("/tmp") if pathlib.Path("/tmp").exists() else pathlib.Path(__file__).parent.parent.parent / "output"
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 mcp = FastMCP("Question Paper Generator")
