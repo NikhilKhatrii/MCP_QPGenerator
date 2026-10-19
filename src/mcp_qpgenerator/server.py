@@ -8,6 +8,7 @@ Tools:
 import os
 import smtplib
 import pathlib
+import logging
 from email import encoders
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
@@ -16,6 +17,10 @@ from email.mime.text import MIMEText
 from dotenv import load_dotenv
 from spire.doc import Document, FileFormat
 from fastmcp import FastMCP
+
+# ── Logging ──────────────────────────────────────────────────────────────────
+logger = logging.getLogger("mcp_qpgenerator")
+logging.basicConfig(level=logging.INFO)
 
 # ── Load .env if present (local dev) ─────────────────────────────────────────
 load_dotenv()
@@ -175,8 +180,12 @@ def send_email(
     str
         A success message listing all recipients the email was sent to.
     """
-    gmail_address = os.environ["GMAIL_ADDRESS"]
-    gmail_password = os.environ["GMAIL_APP_PASSWORD"]
+    try:
+        gmail_address = os.environ["GMAIL_ADDRESS"]
+        gmail_password = os.environ["GMAIL_APP_PASSWORD"]
+    except KeyError as e:
+        logger.exception("Missing email credentials")
+        raise RuntimeError("Missing email credentials: ensure GMAIL_ADDRESS and GMAIL_APP_PASSWORD are set in environment") from e
 
     md_path = pathlib.Path(markdown_file_path)
     if not md_path.exists():
@@ -187,31 +196,39 @@ def send_email(
 
     # ── Convert .md → .docx via Spire.Doc ────────────────────────────────────
     docx_path = md_path.with_suffix(".docx")
-    document = Document()
-    document.LoadFromFile(str(md_path))
-    document.SaveToFile(str(docx_path), FileFormat.Docx)
-    document.Close()
+    try:
+        document = Document()
+        document.LoadFromFile(str(md_path))
+        document.SaveToFile(str(docx_path), FileFormat.Docx)
+        document.Close()
+    except Exception as e:
+        logger.exception("Failed to convert Markdown to DOCX")
+        raise RuntimeError(f"DOCX conversion failed: {e}") from e
 
     # ── Build and send email ──────────────────────────────────────────────────
-    msg = MIMEMultipart()
-    msg["From"] = gmail_address
-    msg["To"] = ", ".join(recipients)
-    msg["Subject"] = subject
-    msg.attach(MIMEText(body, "plain"))
+    try:
+        msg = MIMEMultipart()
+        msg["From"] = gmail_address
+        msg["To"] = ", ".join(recipients)
+        msg["Subject"] = subject
+        msg.attach(MIMEText(body, "plain"))
 
-    with open(docx_path, "rb") as f:
-        part = MIMEBase("application", "octet-stream")
-        part.set_payload(f.read())
-    encoders.encode_base64(part)
-    part.add_header(
-        "Content-Disposition",
-        f'attachment; filename="{docx_path.name}"',
-    )
-    msg.attach(part)
+        with open(docx_path, "rb") as f:
+            part = MIMEBase("application", "octet-stream")
+            part.set_payload(f.read())
+        encoders.encode_base64(part)
+        part.add_header(
+            "Content-Disposition",
+            f'attachment; filename="{docx_path.name}"',
+        )
+        msg.attach(part)
 
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-        server.login(gmail_address, gmail_password)
-        server.sendmail(gmail_address, recipients, msg.as_string())
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(gmail_address, gmail_password)
+            server.sendmail(gmail_address, recipients, msg.as_string())
+    except Exception as e:
+        logger.exception("Failed to send email")
+        raise RuntimeError(f"Email sending failed: {e}") from e
 
     return f"Email sent successfully to: {', '.join(recipients)}"
 
