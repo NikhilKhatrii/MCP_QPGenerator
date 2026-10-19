@@ -18,10 +18,8 @@ from dotenv import load_dotenv
 from spire.doc import Document, FileFormat
 from fastmcp import FastMCP
 
-# ── Load credentials from .env ────────────────────────────────────────────────
+# ── Load .env if present (local dev) ─────────────────────────────────────────
 load_dotenv()
-GMAIL_ADDRESS = os.environ["GMAIL_ADDRESS"]
-GMAIL_APP_PASSWORD = os.environ["GMAIL_APP_PASSWORD"]
 
 # ── Output folder ─────────────────────────────────────────────────────────────
 OUTPUT_DIR = pathlib.Path(__file__).parent.parent.parent / "output"
@@ -210,6 +208,9 @@ def send_email(
     str
         A success message listing all recipients the email was sent to.
     """
+    gmail_address = os.environ["GMAIL_ADDRESS"]
+    gmail_password = os.environ["GMAIL_APP_PASSWORD"]
+
     docx_path = pathlib.Path(docx_file_path)
     if not docx_path.exists():
         raise FileNotFoundError(f"DOCX file not found: {docx_file_path}")
@@ -218,7 +219,7 @@ def send_email(
         raise ValueError("No recipients provided.")
 
     msg = MIMEMultipart()
-    msg["From"] = GMAIL_ADDRESS
+    msg["From"] = gmail_address
     msg["To"] = ", ".join(recipients)
     msg["Subject"] = subject
     msg.attach(MIMEText(body, "plain"))
@@ -235,8 +236,8 @@ def send_email(
     msg.attach(part)
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-        server.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
-        server.sendmail(GMAIL_ADDRESS, recipients, msg.as_string())
+        server.login(gmail_address, gmail_password)
+        server.sendmail(gmail_address, recipients, msg.as_string())
 
     return f"Email sent successfully to: {', '.join(recipients)}"
 
