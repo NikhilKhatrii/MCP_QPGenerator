@@ -96,7 +96,6 @@ ROLL_NO_BOXES = 10
 mcp = FastMCP(
     "Question Paper Generator",
     version="0.2.0",
-    description="MCP server to generate university question papers, convert to DOCX via Pandoc, and email them with safety confirmation guardrails.",
 )
 
 
