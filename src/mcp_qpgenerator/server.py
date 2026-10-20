@@ -28,7 +28,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Inches, Mm, Pt, RGBColor
-from pydantic import Field
+from pydantic import BaseModel, Field
 from fastmcp import FastMCP
 
 # --- Logging ---------------------------------------------------------------
@@ -93,7 +93,11 @@ MARGIN_LEFT_RIGHT = Inches(0.9)
 MARGIN_TOP_BOTTOM = Inches(0.8)
 ROLL_NO_BOXES = 10
 
-mcp = FastMCP("Question Paper Generator")
+mcp = FastMCP(
+    "Question Paper Generator",
+    version="0.2.0",
+    description="MCP server to generate university question papers, convert to DOCX via Pandoc, and email them with safety confirmation guardrails.",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -499,6 +503,31 @@ def _convert_and_send_email_sync(
 # ---------------------------------------------------------------------------
 # TOOL 2 - Convert Markdown to DOCX and email it
 # ---------------------------------------------------------------------------
+class SendEmailArgs(BaseModel):
+    """Explicit Pydantic schema model for send_email tool parameters."""
+    markdown_file_path: str = Field(
+        ...,
+        description="Absolute path to the temporary .md file produced by generate_question_paper.",
+    )
+    recipients: list[str] = Field(
+        ...,
+        min_length=1,
+        description="Explicit list of recipient email addresses. CRITICAL: The AI agent MUST NOT guess or auto-fill email addresses without asking the user directly in chat.",
+    )
+    subject: str = Field(
+        default="Question Paper",
+        description="Email subject line. MUST be explicitly confirmed by the user or default to 'Question Paper'.",
+    )
+    body: str = Field(
+        default="Please find the attached question paper.",
+        description="Plain-text body of the email.",
+    )
+    user_confirmed: bool = Field(
+        default=False,
+        description="Mandatory security confirmation flag. MUST only be set to True after the user has explicitly reviewed the preview and granted permission to dispatch the email. Never set to True autonomously.",
+    )
+
+
 @mcp.tool()
 async def send_email(
     markdown_file_path: str = Field(
@@ -507,6 +536,7 @@ async def send_email(
     ),
     recipients: list[str] = Field(
         ...,
+        min_length=1,
         description="Explicit list of recipient email addresses. CRITICAL: The AI agent MUST NOT guess or auto-fill email addresses without asking the user directly in chat.",
     ),
     subject: str = Field(
@@ -538,33 +568,43 @@ async def send_email(
     recipients : list[str]
         List of recipient email addresses.
     subject : str
-        Email subject line.
+        Email subject line (default: 'Question Paper').
     body : str
         Plain-text body of the email.
     user_confirmed : bool
-        Security confirmation flag (must be True to proceed).
+        Security confirmation flag (default: False; must be True to proceed).
 
     Returns
     -------
     str
         A success message listing all recipients the email was sent to.
     """
-    if user_confirmed is not True:
+    # Validate arguments through Pydantic model for robust schema enforcement
+    args = SendEmailArgs(
+        markdown_file_path=markdown_file_path,
+        recipients=recipients,
+        subject=subject,
+        body=body,
+        user_confirmed=user_confirmed,
+    )
+
+    if args.user_confirmed is not True:
         raise ValueError(
             "Email dispatch rejected: User confirmation has not been explicitly granted. "
             "You must present the preview to the user and obtain their confirmation before setting user_confirmed=True."
         )
 
-    if not recipients:
+    clean_recipients = [r.strip() for r in args.recipients if r and r.strip()]
+    if not clean_recipients:
         raise ValueError("No recipients provided. Please confirm the recipient email address with the user.")
 
     try:
         result = await asyncio.to_thread(
             _convert_and_send_email_sync,
-            markdown_file_path,
-            recipients,
-            subject,
-            body,
+            args.markdown_file_path,
+            clean_recipients,
+            args.subject,
+            args.body,
         )
         return result
     except Exception as e:
