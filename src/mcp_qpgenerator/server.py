@@ -18,6 +18,7 @@ from email.mime.text import MIMEText
 
 from dotenv import load_dotenv
 import pypandoc
+import uuid
 from docx import Document
 from docx.enum.style import WD_STYLE_TYPE
 from docx.enum.table import WD_ROW_HEIGHT_RULE, WD_TABLE_ALIGNMENT
@@ -25,7 +26,6 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Inches, Mm, Pt, RGBColor
-import psycopg
 from fastmcp import FastMCP
 
 # --- Logging ---------------------------------------------------------------
@@ -34,34 +34,6 @@ logging.basicConfig(level=logging.INFO)
 
 # --- Load .env if present (local dev) --------------------------------------
 load_dotenv()
-
-# --- Database --------------------------------------------------------------
-def get_db_connection() -> psycopg.Connection:
-    """Create a new PostgreSQL database connection using DATABASE_URL."""
-    db_url = os.environ.get("DATABASE_URL")
-    if not db_url:
-        raise RuntimeError("DATABASE_URL environment variable is not set")
-    return psycopg.connect(conninfo=db_url)
-
-
-def init_db() -> None:
-    """Create question_papers table if it does not exist."""
-    try:
-        with get_db_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS question_papers (
-                        thread_id VARCHAR PRIMARY KEY,
-                        markdown_content TEXT,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    );
-                    """
-                )
-            conn.commit()
-        logger.info("Database initialized successfully: question_papers table verified")
-    except Exception as e:
-        logger.warning("Database initialization skipped or failed: %s", e)
 
 # --- Output folder (/tmp is always writable in Docker; fallback for local) --
 OUTPUT_DIR = (
@@ -256,7 +228,6 @@ def _postprocess_docx(docx_path: pathlib.Path) -> None:
 # ---------------------------------------------------------------------------
 @mcp.tool()
 def generate_question_paper(
-    thread_id: str,
     university_name: str,
     exam_title: str,
     subject_name: str,
@@ -271,12 +242,10 @@ def generate_question_paper(
     show_roll_no: bool = True,
 ) -> str:
     """
-    Generate a professional Markdown question paper and store it in PostgreSQL.
+    Generate a professional Markdown question paper and save it to a unique temporary file.
 
     Parameters
     ----------
-    thread_id : str
-        Unique identifier for the session/thread to isolate multi-user state.
     university_name : str
         Full name of the university / institution.
     exam_title : str
@@ -310,7 +279,7 @@ def generate_question_paper(
     Returns
     -------
     str
-        A success message indicating the paper was generated and stored.
+        The file path to the generated temporary Markdown file.
     """
     lines: list[str] = []
 
@@ -391,36 +360,13 @@ def generate_question_paper(
 
     md_content = "\n".join(lines)
 
-    # --- Save to PostgreSQL (insert or update based on thread_id) ------------
-    try:
-        with get_db_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS question_papers (
-                        thread_id VARCHAR PRIMARY KEY,
-                        markdown_content TEXT,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    );
-                    """
-                )
-                cur.execute(
-                    """
-                    INSERT INTO question_papers (thread_id, markdown_content, created_at)
-                    VALUES (%s, %s, CURRENT_TIMESTAMP)
-                    ON CONFLICT (thread_id)
-                    DO UPDATE SET
-                        markdown_content = EXCLUDED.markdown_content,
-                        created_at = CURRENT_TIMESTAMP;
-                    """,
-                    (thread_id, md_content),
-                )
-            conn.commit()
-    except Exception as e:
-        logger.exception("Failed to store question paper in database for thread %s", thread_id)
-        raise RuntimeError(f"Database storage failed: {e}") from e
+    # --- Save to unique temporary Markdown file with UUID --------------------
+    run_id = str(uuid.uuid4())[:8]
+    safe_code = re.sub(r"[^\w\-]", "_", subject_code.strip()) or "exam"
+    md_path = OUTPUT_DIR / f"{safe_code}_{run_id}.md"
+    md_path.write_text(md_content, encoding="utf-8")
 
-    return f"Question paper for '{subject_name}' generated and saved successfully for thread '{thread_id}'."
+    return str(md_path)
 
 
 # ---------------------------------------------------------------------------
@@ -428,18 +374,18 @@ def generate_question_paper(
 # ---------------------------------------------------------------------------
 @mcp.tool()
 def send_email(
-    thread_id: str,
+    markdown_file_path: str,
     recipients: list[str],
     subject: str = "Question Paper",
     body: str = "Please find the attached question paper.",
 ) -> str:
     """
-    Retrieve Markdown question paper by thread_id from database, convert to DOCX, email it, and clean up.
+    Convert the Markdown question paper to DOCX, email it to recipients, and delete temporary files.
 
     Parameters
     ----------
-    thread_id : str
-        Unique identifier for the session/thread to retrieve stored question paper.
+    markdown_file_path : str
+        Absolute path to the temporary .md file produced by generate_question_paper.
     recipients : list[str]
         List of recipient email addresses.
     subject : str
@@ -465,29 +411,13 @@ def send_email(
             "GMAIL_APP_PASSWORD are set in environment"
         ) from e
 
-    # --- Query markdown from PostgreSQL using thread_id ----------------------
-    try:
-        with get_db_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT markdown_content FROM question_papers WHERE thread_id = %s;",
-                    (thread_id,),
-                )
-                row = cur.fetchone()
-    except Exception as e:
-        logger.exception("Failed to query database for thread %s", thread_id)
-        raise RuntimeError(f"Database query failed: {e}") from e
+    md_path = pathlib.Path(markdown_file_path)
+    if not md_path.exists():
+        raise FileNotFoundError(f"Markdown file not found: {markdown_file_path}")
 
-    if not row or not row[0]:
-        raise ValueError(f"No question paper found for thread_id: {thread_id}")
-
-    md_content: str = row[0]
-
-    # --- Write temporary .md file and convert to .docx ----------------------
-    md_path = OUTPUT_DIR / f"{thread_id}_question_paper.md"
+    # --- Convert .md to .docx using the styled reference document ----------
     docx_path = md_path.with_suffix(".docx")
     try:
-        md_path.write_text(md_content, encoding="utf-8")
         ref_docx = _build_reference_docx()
         pypandoc.convert_file(
             str(md_path),
@@ -526,7 +456,7 @@ def send_email(
         logger.exception("Failed to send email")
         raise RuntimeError(f"Email sending failed: {e}") from e
     finally:
-        # Clean up temporary local files
+        # Immediately delete temporary files to clean up disk space
         if md_path.exists():
             try:
                 md_path.unlink()
@@ -538,19 +468,6 @@ def send_email(
             except Exception:
                 pass
 
-    # --- Clean up database row after successful send -------------------------
-    try:
-        with get_db_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "DELETE FROM question_papers WHERE thread_id = %s;",
-                    (thread_id,),
-                )
-            conn.commit()
-        logger.info("Successfully cleaned up database record for thread %s", thread_id)
-    except Exception as e:
-        logger.warning("Failed to clean up database row for thread %s: %s", thread_id, e)
-
     return f"Email sent successfully to: {', '.join(recipients)}"
 
 
@@ -558,7 +475,6 @@ def send_email(
 # Entry point
 # ---------------------------------------------------------------------------
 def main() -> None:
-    init_db()
     mcp.run()
 
 
