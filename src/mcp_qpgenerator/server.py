@@ -11,6 +11,8 @@ import smtplib
 import pathlib
 import logging
 import subprocess
+import asyncio
+import time
 from email import encoders
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
@@ -42,6 +44,44 @@ OUTPUT_DIR = (
     else pathlib.Path(__file__).parent.parent.parent / "output"
 )
 OUTPUT_DIR.mkdir(exist_ok=True)
+
+# Maximum age for temporary question paper files (30 minutes)
+MAX_TEMP_FILE_AGE_SECONDS = 30 * 60
+
+
+def cleanup_stale_temp_files(max_age_seconds: int = MAX_TEMP_FILE_AGE_SECONDS) -> int:
+    """
+    Scan OUTPUT_DIR (and /tmp) for temporary question paper files (.md, .docx)
+    older than max_age_seconds (default 30 mins) and delete them to prevent disk bloat.
+    """
+    now = time.time()
+    cleaned = 0
+    dirs_to_scan = {OUTPUT_DIR}
+    if pathlib.Path("/tmp").exists():
+        dirs_to_scan.add(pathlib.Path("/tmp"))
+
+    for directory in dirs_to_scan:
+        try:
+            for item in directory.glob("*_*.md"):
+                try:
+                    if item.is_file() and (now - item.stat().st_mtime > max_age_seconds):
+                        item.unlink(missing_ok=True)
+                        cleaned += 1
+                except Exception:
+                    pass
+            for item in directory.glob("*_*.docx"):
+                try:
+                    if item.is_file() and (now - item.stat().st_mtime > max_age_seconds):
+                        item.unlink(missing_ok=True)
+                        cleaned += 1
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.warning("Error during temp file cleanup in %s: %s", directory, e)
+
+    if cleaned > 0:
+        logger.info("Cleaned up %d stale temporary file(s)", cleaned)
+    return cleaned
 
 FONT_NAME = "Times New Roman"
 
@@ -227,7 +267,7 @@ def _postprocess_docx(docx_path: pathlib.Path) -> None:
 # TOOL 1 - Generate Markdown question paper
 # ---------------------------------------------------------------------------
 @mcp.tool()
-def generate_question_paper(
+async def generate_question_paper(
     university_name: str,
     exam_title: str,
     subject_name: str,
@@ -243,6 +283,12 @@ def generate_question_paper(
 ) -> str:
     """
     Generate a professional Markdown question paper and save it to a unique temporary file.
+
+    IMPORTANT SAFETY & INTERACTION DIRECTIVE FOR AI AGENTS:
+    - Never assume the question paper is finalized immediately without the user's consent.
+    - Always present the generated Markdown preview to the user in chat first.
+    - Ask the user if they would like to make any adjustments (e.g. marks, question wording, instructions).
+    - Explicitly ask the user to confirm the content and provide/confirm the target recipient email addresses before invoking `send_email`.
 
     Parameters
     ----------
@@ -281,6 +327,9 @@ def generate_question_paper(
     str
         The file path to the generated temporary Markdown file.
     """
+    # Trigger non-blocking background cleanup of any stale temp files (> 30 mins)
+    await asyncio.to_thread(cleanup_stale_temp_files)
+
     lines: list[str] = []
 
     # --- Roll No. placeholder (turned into boxes when the docx is built) ---
@@ -364,58 +413,34 @@ def generate_question_paper(
     run_id = str(uuid.uuid4())[:8]
     safe_code = re.sub(r"[^\w\-]", "_", subject_code.strip()) or "exam"
     md_path = OUTPUT_DIR / f"{safe_code}_{run_id}.md"
-    md_path.write_text(md_content, encoding="utf-8")
+
+    # Non-blocking file write
+    await asyncio.to_thread(md_path.write_text, md_content, encoding="utf-8")
 
     return str(md_path)
 
 
 # ---------------------------------------------------------------------------
-# TOOL 2 - Convert Markdown to DOCX and email it
+# Helper: synchronous DOCX conversion and email sending executed in thread
 # ---------------------------------------------------------------------------
-@mcp.tool()
-def send_email(
+def _convert_and_send_email_sync(
     markdown_file_path: str,
     recipients: list[str],
-    subject: str = "Question Paper",
-    body: str = "Please find the attached question paper.",
+    subject: str,
+    body: str,
 ) -> str:
-    """
-    Convert the Markdown question paper to DOCX, email it to recipients, and delete temporary files.
-
-    Parameters
-    ----------
-    markdown_file_path : str
-        Absolute path to the temporary .md file produced by generate_question_paper.
-    recipients : list[str]
-        List of recipient email addresses.
-    subject : str
-        Email subject line.
-    body : str
-        Plain-text body of the email.
-
-    Returns
-    -------
-    str
-        A success message listing all recipients the email was sent to.
-    """
-    if not recipients:
-        raise ValueError("No recipients provided.")
-
-    try:
-        gmail_address = os.environ["GMAIL_ADDRESS"]
-        gmail_password = os.environ["GMAIL_APP_PASSWORD"]
-    except KeyError as e:
-        logger.exception("Missing email credentials")
+    gmail_address = os.environ.get("GMAIL_ADDRESS")
+    gmail_password = os.environ.get("GMAIL_APP_PASSWORD")
+    if not gmail_address or not gmail_password:
         raise RuntimeError(
             "Missing email credentials: ensure GMAIL_ADDRESS and "
             "GMAIL_APP_PASSWORD are set in environment"
-        ) from e
+        )
 
     md_path = pathlib.Path(markdown_file_path)
     if not md_path.exists():
         raise FileNotFoundError(f"Markdown file not found: {markdown_file_path}")
 
-    # --- Convert .md to .docx using the styled reference document ----------
     docx_path = md_path.with_suffix(".docx")
     try:
         ref_docx = _build_reference_docx()
@@ -427,12 +452,7 @@ def send_email(
             extra_args=[f"--reference-doc={ref_docx}"],
         )
         _postprocess_docx(docx_path)
-    except Exception as e:
-        logger.exception("Failed to convert Markdown to DOCX")
-        raise RuntimeError(f"DOCX conversion failed: {e}") from e
 
-    # --- Build and send email ------------------------------------------------
-    try:
         msg = MIMEMultipart()
         msg["From"] = gmail_address
         msg["To"] = ", ".join(recipients)
@@ -452,9 +472,6 @@ def send_email(
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
             server.login(gmail_address, gmail_password)
             server.sendmail(gmail_address, recipients, msg.as_string())
-    except Exception as e:
-        logger.exception("Failed to send email")
-        raise RuntimeError(f"Email sending failed: {e}") from e
     finally:
         # Immediately delete temporary files to clean up disk space
         if md_path.exists():
@@ -469,6 +486,57 @@ def send_email(
                 pass
 
     return f"Email sent successfully to: {', '.join(recipients)}"
+
+
+# ---------------------------------------------------------------------------
+# TOOL 2 - Convert Markdown to DOCX and email it
+# ---------------------------------------------------------------------------
+@mcp.tool()
+async def send_email(
+    markdown_file_path: str,
+    recipients: list[str],
+    subject: str = "Question Paper",
+    body: str = "Please find the attached question paper.",
+) -> str:
+    """
+    Convert the Markdown question paper to DOCX, email it to recipients, and delete temporary files.
+
+    IMPORTANT SAFETY & INTERACTION DIRECTIVE FOR AI AGENTS:
+    - Never assume recipient emails automatically.
+    - Always ask the user for confirmation and explicit recipient emails before calling this tool.
+    - Ensure the user has reviewed the generated paper content.
+
+    Parameters
+    ----------
+    markdown_file_path : str
+        Absolute path to the temporary .md file produced by generate_question_paper.
+    recipients : list[str]
+        List of recipient email addresses.
+    subject : str
+        Email subject line.
+    body : str
+        Plain-text body of the email.
+
+    Returns
+    -------
+    str
+        A success message listing all recipients the email was sent to.
+    """
+    if not recipients:
+        raise ValueError("No recipients provided. Please confirm the recipient email address with the user.")
+
+    try:
+        result = await asyncio.to_thread(
+            _convert_and_send_email_sync,
+            markdown_file_path,
+            recipients,
+            subject,
+            body,
+        )
+        return result
+    except Exception as e:
+        logger.exception("Failed to convert and send email asynchronously")
+        raise RuntimeError(f"Email sending failed: {e}") from e
 
 
 # ---------------------------------------------------------------------------
