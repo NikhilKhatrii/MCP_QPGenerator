@@ -1,3 +1,5 @@
+> 🛑 **DEPRECATED / STOPPED FEATURE:** This branch used PostgreSQL and thread_id, which has been replaced by UUID temporary file isolation.
+
 # MCP Question Paper Generator
 
 An MCP server built with **FastMCP** that lets any AI assistant:
