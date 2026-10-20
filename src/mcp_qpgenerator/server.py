@@ -90,17 +90,15 @@ def generate_question_paper(
     lines: list[str] = []
 
     # ── Header ────────────────────────────────────────────────────────────────
-    lines += [
-        '<div align="center">',
-        f"<h1>{university_name}</h1>",
-        f"<h2>{exam_title}</h2>",
-        f"<h3>{course} - Semester {semester}</h3>",
-        f"<h3>{subject_name} ({subject_code})</h3>",
-        "</div>",
-        "",
-        f'<table style="width:100%"><tr><td style="text-align:left"><strong>Time:</strong> {duration}</td><td style="text-align:right"><strong>Max Marks:</strong> {total_marks}</td></tr></table><hr>',
-        "",
-    ]
+    header = f"""| | | |
+| :--- | :---: | ---: |
+| **Time: {duration}** | **{university_name}** | **Max Marks: {total_marks}** |
+| | **{exam_title}** | |
+| | **{course} - {semester}** | |
+| | **{subject_name} ({subject_code})** | |
+"""
+    lines.append(header.strip())
+    lines.append("")
 
     # ── General Instructions ──────────────────────────────────────────────────
     if instructions:
@@ -110,7 +108,7 @@ def generate_question_paper(
         ]
         for i, inst in enumerate(instructions, 1):
             lines.append(f"{i}. {inst}")
-        lines += ["", "<hr>", ""]
+        lines += ["", "---", ""]
 
     # ── Sections ──────────────────────────────────────────────────────────────
     for sec in sections:
@@ -120,7 +118,7 @@ def generate_question_paper(
         questions: list[str] = sec.get("questions", [])
 
         lines += [
-            f'<h3 align="center">{title}</h3>',
+            f"### {title}",
             "",
         ]
         if attempt_info:
@@ -135,7 +133,7 @@ def generate_question_paper(
             lines.append(f"{q_num}. {question}{marks_suffix}")
             lines.append("")
 
-        lines += ["<hr>", ""]
+        lines += ["---", ""]
 
     md_content = "\n".join(lines)
 
