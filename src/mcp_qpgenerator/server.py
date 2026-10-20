@@ -91,31 +91,26 @@ def generate_question_paper(
 
     # ── Header ────────────────────────────────────────────────────────────────
     lines += [
-        f"# {university_name}",
+        '<div align="center">',
+        f"<h1>{university_name}</h1>",
+        f"<h2>{exam_title}</h2>",
+        f"<h3>{course} - Semester {semester}</h3>",
+        f"<h3>{subject_name} ({subject_code})</h3>",
+        "</div>",
         "",
-        f"## {exam_title}",
-        "",
-        "---",
-        "",
-        f"| **Subject**      | {subject_name} ({subject_code}) |",
-        f"| **Course**       | {course}                        |",
-        f"| **Semester**     | {semester}                      |",
-        f"| **Date**         | {exam_date}                     |",
-        f"| **Duration**     | {duration}                      |",
-        f"| **Total Marks**  | {total_marks}                   |",
-        "",
-        "---",
+        f'<table style="width:100%"><tr><td style="text-align:left"><strong>Time:</strong> {duration}</td><td style="text-align:right"><strong>Max Marks:</strong> {total_marks}</td></tr></table><hr>',
         "",
     ]
 
     # ── General Instructions ──────────────────────────────────────────────────
-    lines += [
-        "### General Instructions",
-        "",
-    ]
-    for i, inst in enumerate(instructions, 1):
-        lines.append(f"{i}. {inst}")
-    lines += ["", "---", ""]
+    if instructions:
+        lines += [
+            "### General Instructions",
+            "",
+        ]
+        for i, inst in enumerate(instructions, 1):
+            lines.append(f"{i}. {inst}")
+        lines += ["", "<hr>", ""]
 
     # ── Sections ──────────────────────────────────────────────────────────────
     for sec in sections:
@@ -125,7 +120,7 @@ def generate_question_paper(
         questions: list[str] = sec.get("questions", [])
 
         lines += [
-            f"## {title}",
+            f'<h3 align="center">{title}</h3>',
             "",
         ]
         if attempt_info:
@@ -136,10 +131,11 @@ def generate_question_paper(
             lines.append("")
 
         for q_num, question in enumerate(questions, 1):
-            lines.append(f"**Q{q_num}.** {question}")
+            marks_suffix = f" **[{sec_marks}]**" if sec_marks else ""
+            lines.append(f"{q_num}. {question}{marks_suffix}")
             lines.append("")
 
-        lines += ["---", ""]
+        lines += ["<hr>", ""]
 
     md_content = "\n".join(lines)
 
