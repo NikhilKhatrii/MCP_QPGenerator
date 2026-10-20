@@ -201,7 +201,12 @@ def send_email(
             pypandoc.convert_file(str(md_path), "docx", outputfile=str(docx_path))
         except OSError:
             logger.info("Pandoc not found, attempting auto-download via pypandoc...")
-            pypandoc.download_pandoc(targetfolder="/tmp")
+            original_cwd = os.getcwd()
+            try:
+                os.chdir("/tmp")
+                pypandoc.download_pandoc(targetfolder="/tmp")
+            finally:
+                os.chdir(original_cwd)
             os.environ.setdefault("PYPANDOC_PANDOC", "/tmp/pandoc")
             pypandoc.convert_file(str(md_path), "docx", outputfile=str(docx_path))
     except Exception as e:
