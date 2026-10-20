@@ -397,6 +397,15 @@ def generate_question_paper(
             with conn.cursor() as cur:
                 cur.execute(
                     """
+                    CREATE TABLE IF NOT EXISTS question_papers (
+                        thread_id VARCHAR PRIMARY KEY,
+                        markdown_content TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    );
+                    """
+                )
+                cur.execute(
+                    """
                     INSERT INTO question_papers (thread_id, markdown_content, created_at)
                     VALUES (%s, %s, CURRENT_TIMESTAMP)
                     ON CONFLICT (thread_id)
