@@ -98,6 +98,28 @@ uv run python -m src.mcp_qpgenerator.server
 
 ---
 
+## Modular Project Structure
+
+The codebase has been refactored from a monolithic file into a modular Python package:
+
+```text
+MCP/
+├── src/
+│   └── mcp_qpgenerator/
+│       ├── __init__.py      # Package entry point
+│       ├── server.py        # FastMCP entry point & tool registration
+│       ├── models.py        # Pydantic schemas & safety guardrail models
+│       ├── generator.py     # Markdown generation & UUID temp file lifecycle
+│       └── emailer.py       # DOCX conversion, Word styling & email dispatching
+├── output/                  # Fallback output directory for local dev
+├── pyproject.toml           # Project dependencies and script configuration
+├── Dockerfile               # Container build for FastMCP Cloud deployment
+├── uv.lock                  # Pinned dependencies
+└── README.md
+```
+
+---
+
 ## Deployment (FastMCP Cloud / Docker)
 
 The project includes an optimized [Dockerfile](file:///c:/Users/Ujjwal/Desktop/MCP/Dockerfile) built on `python:3.12-slim-bookworm`:
