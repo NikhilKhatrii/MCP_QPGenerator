@@ -9,9 +9,10 @@ ENV PYTHONUNBUFFERED=1 \
     UV_LINK_MODE=copy \
     PATH="/app/.venv/bin:$PATH"
 
-# Install system dependencies (pandoc for pypandoc conversion)
+# Install system dependencies (pandoc for pypandoc conversion, binutils for ar/deb extraction)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     pandoc \
+    binutils \
     curl \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
