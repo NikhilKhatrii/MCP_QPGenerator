@@ -1,3 +1,5 @@
+> 🛑 **DEPRECATED / STOPPED FEATURE:** This branch used PostgreSQL table initialization, which has been replaced.
+
 # MCP Question Paper Generator
 
 An MCP server built with **FastMCP** that lets any AI assistant:
