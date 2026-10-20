@@ -197,18 +197,7 @@ def send_email(
     # ── Convert .md → .docx via pypandoc ──────────────────────────────────────
     docx_path = md_path.with_suffix(".docx")
     try:
-        try:
-            pypandoc.convert_file(str(md_path), "docx", outputfile=str(docx_path))
-        except OSError:
-            logger.info("Pandoc not found, attempting auto-download via pypandoc...")
-            original_cwd = os.getcwd()
-            try:
-                os.chdir("/tmp")
-                pypandoc.download_pandoc(targetfolder="/tmp")
-            finally:
-                os.chdir(original_cwd)
-            os.environ.setdefault("PYPANDOC_PANDOC", "/tmp/pandoc")
-            pypandoc.convert_file(str(md_path), "docx", outputfile=str(docx_path))
+        pypandoc.convert_file(str(md_path), "docx", outputfile=str(docx_path))
     except Exception as e:
         logger.exception("Failed to convert Markdown to DOCX")
         raise RuntimeError(f"DOCX conversion failed: {e}") from e
