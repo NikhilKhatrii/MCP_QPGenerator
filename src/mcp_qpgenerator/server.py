@@ -6,6 +6,7 @@ Tools:
 """
 
 import os
+import re
 import smtplib
 import pathlib
 import logging
@@ -19,9 +20,11 @@ from dotenv import load_dotenv
 import pypandoc
 from docx import Document
 from docx.enum.style import WD_STYLE_TYPE
-from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.table import WD_ROW_HEIGHT_RULE, WD_TABLE_ALIGNMENT
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT
+from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-from docx.shared import Pt, RGBColor
+from docx.shared import Inches, Mm, Pt, RGBColor
 from fastmcp import FastMCP
 
 # --- Logging ---------------------------------------------------------------
@@ -41,11 +44,18 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 
 FONT_NAME = "Times New Roman"
 
+# --- Page layout (change these to adjust the paper) -------------------------
+PAGE_WIDTH = Mm(210)        # A4. For US Letter use Inches(8.5)
+PAGE_HEIGHT = Mm(297)       # A4. For US Letter use Inches(11)
+MARGIN_LEFT_RIGHT = Inches(0.9)
+MARGIN_TOP_BOTTOM = Inches(0.8)
+ROLL_NO_BOXES = 10
+
 mcp = FastMCP("Question Paper Generator")
 
 
 # ---------------------------------------------------------------------------
-# Helper: build a reference .docx that controls how the paper looks in Word
+# Reference docx: controls fonts, styles and page layout of the output
 # ---------------------------------------------------------------------------
 def _set_font(style, size: int, bold: bool | None = None) -> None:
     """Force a font on a style and strip theme fonts/colors that override it."""
@@ -64,7 +74,7 @@ def _set_font(style, size: int, bold: bool | None = None) -> None:
 
 
 def _build_reference_docx() -> pathlib.Path:
-    """Create a pandoc reference.docx with exam-paper styling."""
+    """Create a pandoc reference.docx with exam-paper styling and margins."""
     ref_path = OUTPUT_DIR / "qp_reference.docx"
 
     # Start from pandoc's own default reference so all its styles exist
@@ -77,6 +87,15 @@ def _build_reference_docx() -> pathlib.Path:
 
     doc = Document(str(ref_path))
     styles = doc.styles
+
+    # Page size and margins (pandoc copies these into the output document)
+    for section in doc.sections:
+        section.page_width = PAGE_WIDTH
+        section.page_height = PAGE_HEIGHT
+        section.left_margin = MARGIN_LEFT_RIGHT
+        section.right_margin = MARGIN_LEFT_RIGHT
+        section.top_margin = MARGIN_TOP_BOTTOM
+        section.bottom_margin = MARGIN_TOP_BOTTOM
 
     # Body text styles pandoc uses
     for name in ("Normal", "Body Text", "First Paragraph", "Compact"):
@@ -106,8 +125,101 @@ def _build_reference_docx() -> pathlib.Path:
     ctr.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
     ctr.paragraph_format.space_after = Pt(2)
 
+    # Italic note under each section title, with a bit more room below
+    note = styles.add_style("QPNote", WD_STYLE_TYPE.PARAGRAPH)
+    note.base_style = styles["Normal"]
+    _set_font(note, 11)
+    note.font.italic = True
+    note.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    note.paragraph_format.space_after = Pt(8)
+
+    # Placeholder paragraph that is replaced by the Roll No. boxes later
+    roll = styles.add_style("QPRollNo", WD_STYLE_TYPE.PARAGRAPH)
+    roll.base_style = styles["Normal"]
+    _set_font(roll, 11)
+
     doc.save(str(ref_path))
     return ref_path
+
+
+# ---------------------------------------------------------------------------
+# Post-processing helpers (run on the .docx after pandoc)
+# ---------------------------------------------------------------------------
+def _set_cell_borders(cell, sz: int = 8) -> None:
+    """Draw a thin black border on all four sides of a table cell."""
+    tc_pr = cell._tc.get_or_add_tcPr()
+    borders = OxmlElement("w:tcBorders")
+    for edge in ("top", "left", "bottom", "right"):
+        el = OxmlElement(f"w:{edge}")
+        el.set(qn("w:val"), "single")
+        el.set(qn("w:sz"), str(sz))
+        el.set(qn("w:space"), "0")
+        el.set(qn("w:color"), "000000")
+        borders.append(el)
+    tc_pr.append(borders)
+
+
+def _build_roll_no_table(doc):
+    """Return a right-aligned 'Roll No.:' label followed by empty boxes."""
+    table = doc.add_table(rows=1, cols=ROLL_NO_BOXES + 1)
+    table.alignment = WD_TABLE_ALIGNMENT.RIGHT
+    table.autofit = False
+
+    row = table.rows[0]
+    row.height = Inches(0.3)
+    row.height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
+
+    for i, cell in enumerate(row.cells):
+        cell.width = Inches(0.95) if i == 0 else Inches(0.28)
+        para = cell.paragraphs[0]
+        para.paragraph_format.space_after = Pt(0)
+        para.paragraph_format.space_before = Pt(0)
+        if i == 0:
+            run = para.add_run("Roll No.:")
+            run.bold = True
+            run.font.name = FONT_NAME
+            run.font.size = Pt(11)
+        else:
+            para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            _set_cell_borders(cell)
+    return table
+
+
+def _replace_roll_no_placeholder(doc) -> None:
+    """Swap the QPRollNo placeholder paragraph for the real boxes."""
+    for para in doc.paragraphs:
+        if para.style is not None and para.style.name == "QPRollNo":
+            table = _build_roll_no_table(doc)
+            anchor = para._p
+            anchor.addprevious(table._tbl)
+            anchor.getparent().remove(anchor)
+            break
+
+
+def _right_align_marks(doc) -> None:
+    """Move the trailing '[5]' style marks of each question to the right edge."""
+    section = doc.sections[0]
+    tab_pos = section.page_width - section.left_margin - section.right_margin
+
+    for para in doc.paragraphs:
+        if len(para.runs) < 2:
+            continue
+        last = para.runs[-1]
+        if not re.fullmatch(r"\[\d+\]", last.text.strip()):
+            continue
+
+        # Drop the space before the marks, then add a right-aligned tab stop
+        prev = para.runs[-2]
+        prev.text = prev.text.rstrip()
+        para.paragraph_format.tab_stops.add_tab_stop(tab_pos, WD_TAB_ALIGNMENT.RIGHT)
+        last.text = "\t" + last.text.strip()
+
+
+def _postprocess_docx(docx_path: pathlib.Path) -> None:
+    doc = Document(str(docx_path))
+    _replace_roll_no_placeholder(doc)
+    _right_align_marks(doc)
+    doc.save(str(docx_path))
 
 
 # ---------------------------------------------------------------------------
@@ -126,6 +238,7 @@ def generate_question_paper(
     duration: str,
     instructions: list[str],
     sections: list[dict],
+    show_roll_no: bool = True,
 ) -> str:
     """
     Generate a professional Markdown question paper and save it to disk.
@@ -159,6 +272,8 @@ def generate_question_paper(
           - section_marks (int)   : marks per question in this section
           - attempt_info (str)    : e.g. "Attempt any 5 out of 8 questions"
           - questions (list[str]) : list of question strings
+    show_roll_no : bool
+        If True (default), a Roll No. box row is shown at the top right.
 
     Returns
     -------
@@ -166,6 +281,15 @@ def generate_question_paper(
         Absolute path to the saved Markdown file.
     """
     lines: list[str] = []
+
+    # --- Roll No. placeholder (turned into boxes when the docx is built) ---
+    if show_roll_no:
+        lines += [
+            '::: {custom-style="QPRollNo"}',
+            "ROLLNO",
+            ":::",
+            "",
+        ]
 
     # --- Title block (centered via custom styles in the reference docx) ----
     lines += [
@@ -222,8 +346,8 @@ def generate_question_paper(
             note_parts.append(f"Each question carries {sec_marks} marks")
         if note_parts:
             lines += [
-                '::: {custom-style="QPCenter"}',
-                f"*({'. '.join(note_parts)}.)*",
+                '::: {custom-style="QPNote"}',
+                f"({'. '.join(note_parts)}.)",
                 ":::",
                 "",
             ]
@@ -300,6 +424,7 @@ def send_email(
             outputfile=str(docx_path),
             extra_args=[f"--reference-doc={ref_docx}"],
         )
+        _postprocess_docx(docx_path)
     except Exception as e:
         logger.exception("Failed to convert Markdown to DOCX")
         raise RuntimeError(f"DOCX conversion failed: {e}") from e
