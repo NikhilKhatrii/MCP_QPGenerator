@@ -15,7 +15,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 from dotenv import load_dotenv
-from spire.doc import Document, FileFormat
+import pypandoc
 from fastmcp import FastMCP
 
 # ── Logging ──────────────────────────────────────────────────────────────────
@@ -194,13 +194,10 @@ def send_email(
     if not recipients:
         raise ValueError("No recipients provided.")
 
-    # ── Convert .md → .docx via Spire.Doc ────────────────────────────────────
+    # ── Convert .md → .docx via pypandoc ──────────────────────────────────────
     docx_path = md_path.with_suffix(".docx")
     try:
-        document = Document()
-        document.LoadFromFile(str(md_path))
-        document.SaveToFile(str(docx_path), FileFormat.Docx)
-        document.Close()
+        pypandoc.convert_file(str(md_path), "docx", outputfile=str(docx_path))
     except Exception as e:
         logger.exception("Failed to convert Markdown to DOCX")
         raise RuntimeError(f"DOCX conversion failed: {e}") from e

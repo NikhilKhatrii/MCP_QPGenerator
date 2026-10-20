@@ -767,9 +767,9 @@ dependencies = [
     { name = "beautifulsoup4" },
     { name = "fastmcp" },
     { name = "markdown" },
+    { name = "pypandoc" },
     { name = "python-docx" },
     { name = "python-dotenv" },
-    { name = "spire-doc" },
 ]
 
 [package.metadata]
@@ -777,9 +777,9 @@ requires-dist = [
     { name = "beautifulsoup4", specifier = ">=4.15.0" },
     { name = "fastmcp", specifier = ">=2.3.0" },
     { name = "markdown", specifier = ">=3.11.1" },
+    { name = "pypandoc", specifier = ">=1.17" },
     { name = "python-docx", specifier = ">=1.2.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
-    { name = "spire-doc", specifier = ">=14.9.1" },
 ]
 
 [[package]]
@@ -862,15 +862,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/58/e6/d0abbb256b44e6a05748c6942511ff67db8dbb068de0c35b24bf1b395b09/platformdirs-4.13.5.tar.gz", hash = "sha256:05831adf87d392760f4b5c3a0a95579ab5a10b18b9b9bd43680dcb47544788a0", size = 62362, upload-time = "2026-10-19T01:02:11.778Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/6c/8a/1d8cb3842909dc193a73835adedf412e32e18f8ffd59f43983949622fe6f/platformdirs-4.13.5-py3-none-any.whl", hash = "sha256:53d3ec4280b815c1e0b02edad7f9ee8fda1ba9c0865dd9c2e6e63849ce82fc1e", size = 32779, upload-time = "2026-10-19T01:02:10.17Z" },
-]
-
-[[package]]
-name = "plum-dispatch"
-version = "1.7.4"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/39/4e/f4d6b2bd80a9880989d37773f0f2e3a91a2d5352732e4ebb68b5606bca83/plum-dispatch-1.7.4.tar.gz", hash = "sha256:1c1d15b2842b5fa98405fd3dff6fad4887bdc77b60bd200e209d76ebfe9990fe", size = 56429, upload-time = "2022-10-21T06:29:20.747Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/e6/b6/3aaa985591c63da64c7bd8c5f470442a4c00b37ad3ed057f21de14174f83/plum_dispatch-1.7.4-py3-none-any.whl", hash = "sha256:c40dbeab269bbbf972ce0dbc078380da19ebaee1a370a2c564e1814a11bde216", size = 24238, upload-time = "2022-10-21T06:29:19.054Z" },
 ]
 
 [[package]]
@@ -1069,6 +1060,15 @@ wheels = [
 [package.optional-dependencies]
 crypto = [
     { name = "cryptography" },
+]
+
+[[package]]
+name = "pypandoc"
+version = "1.17"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/ea/d6/410615fc433e5d1eacc00db2044ae2a9c82302df0d35366fe2bd15de024d/pypandoc-1.17.tar.gz", hash = "sha256:51179abfd6e582a25ed03477541b48836b5bba5a4c3b282a547630793934d799", size = 69071, upload-time = "2026-03-14T22:39:07.21Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0c/86/e2ffa604eacfbec3f430b1d850e7e04c4101eca1a5828f9ae54bf51dfba4/pypandoc-1.17-py3-none-any.whl", hash = "sha256:01fdbffa61edb9f8e82e8faad6954efcb7b6f8f0634aead4d89e322a00225a67", size = 23554, upload-time = "2026-03-14T22:38:46.007Z" },
 ]
 
 [[package]]
@@ -1353,21 +1353,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/5e/77/2dcfa996b01702ab8fd0763d84098f6a640d6162a328f1c04c2697579a1a/soupsieve-3.0.3.tar.gz", hash = "sha256:7dcf6022eed0399eb9934a75e020148f7a2024c37b7dfcd3cf2c5505d69c364e", size = 115923, upload-time = "2026-10-12T13:21:17.696Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/49/ca/f639c80449997b88aba7bc9705d25dd76cc0844f45f187862fd8f8bb18fa/soupsieve-3.0.3-py3-none-any.whl", hash = "sha256:fa30e3ba4809cb81ce1f3209f2fbe3e779fc445f0439bc147a0d7c4601743f21", size = 41705, upload-time = "2026-10-12T13:21:16.474Z" },
-]
-
-[[package]]
-name = "spire-doc"
-version = "14.9.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "plum-dispatch" },
-]
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/42/a3/07750ceb3ff1fe8df6b36eadd48bfa1ea14f8fa1c09beb57e4387787784c/spire_doc-14.9.1-py3-none-macosx_10_7_universal.whl", hash = "sha256:bf2e537990405d6fdf324f76fa839c3a2fa35ce10169ddab666829aefa548e62", size = 53866494, upload-time = "2026-09-29T02:34:42.755Z" },
-    { url = "https://files.pythonhosted.org/packages/15/a4/1f61d7f302e9042c8c064467a05d4a81c0c53c8137c28fa6b77d3c5febf8/spire_doc-14.9.1-py3-none-macosx_11_0_arm64.whl", hash = "sha256:bf2982e2a850124047a5e15da45433c811b89bb41a5db42fff0e9d5231259876", size = 29535783, upload-time = "2026-09-29T02:34:51.908Z" },
-    { url = "https://files.pythonhosted.org/packages/6c/6f/a127310b6d5e7db8674d3f6797f5219e0024a03863515dede98f1876095d/spire_doc-14.9.1-py3-none-manylinux2014_aarch64.whl", hash = "sha256:d11a6004e4e6da31f53c7562fc5c5f17d8c9d7009c77440b180a827746ceeea6", size = 25653595, upload-time = "2026-09-29T02:35:00.049Z" },
-    { url = "https://files.pythonhosted.org/packages/5d/32/62d4d5a405df4d04d18caf2cfd308e90091057cc0c7e4737c2248fb934bf/spire_doc-14.9.1-py3-none-manylinux_2_34_x86_64.whl", hash = "sha256:259c6bd0362d979a08165eca641f4702d3d25c73270baa902402d8586f9198ee", size = 45136365, upload-time = "2026-09-29T02:35:11.402Z" },
-    { url = "https://files.pythonhosted.org/packages/0b/c8/dd6d32f9a3d88b2c8cc1c3aed6a616301a6c3bdd4bc81be0bf3dcca26927/spire_doc-14.9.1-py3-none-win_amd64.whl", hash = "sha256:5e1a277a0fe11eaf86f7cf1076a03eded95dfd0bb2439352636464b804cc6a33", size = 29162592, upload-time = "2026-09-29T02:35:19.252Z" },
 ]
 
 [[package]]

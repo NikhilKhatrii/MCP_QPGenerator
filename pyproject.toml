@@ -11,9 +11,9 @@ dependencies = [
     "beautifulsoup4>=4.15.0",
     "fastmcp>=2.3.0",
     "markdown>=3.11.1",
+    "pypandoc>=1.17",
     "python-docx>=1.2.0",
     "python-dotenv>=1.0.0",
-    "spire-doc>=14.9.1",
 ]
 
 

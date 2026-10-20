@@ -9,14 +9,9 @@ ENV PYTHONUNBUFFERED=1 \
     UV_LINK_MODE=copy \
     PATH="/app/.venv/bin:$PATH"
 
-# Install system dependencies required by spire.doc and common utilities
-# fontconfig, libfontconfig1, libgl1, libc6, libicu-dev prevent segmentation faults with spire.doc
+# Install system dependencies (pandoc for pypandoc conversion)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    fontconfig \
-    libfontconfig1 \
-    libgl1 \
-    libc6 \
-    libicu-dev \
+    pandoc \
     curl \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
