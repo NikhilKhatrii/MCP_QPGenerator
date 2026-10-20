@@ -9,6 +9,7 @@ import os
 import smtplib
 import pathlib
 import logging
+import subprocess
 from email import encoders
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
@@ -16,25 +17,102 @@ from email.mime.text import MIMEText
 
 from dotenv import load_dotenv
 import pypandoc
+from docx import Document
+from docx.enum.style import WD_STYLE_TYPE
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml.ns import qn
+from docx.shared import Pt, RGBColor
 from fastmcp import FastMCP
 
-# ── Logging ──────────────────────────────────────────────────────────────────
+# --- Logging ---------------------------------------------------------------
 logger = logging.getLogger("mcp_qpgenerator")
 logging.basicConfig(level=logging.INFO)
 
-# ── Load .env if present (local dev) ─────────────────────────────────────────
+# --- Load .env if present (local dev) --------------------------------------
 load_dotenv()
 
-# ── Output folder (/tmp is always writable in Docker; fallback for local dev) ─
-OUTPUT_DIR = pathlib.Path("/tmp") if pathlib.Path("/tmp").exists() else pathlib.Path(__file__).parent.parent.parent / "output"
+# --- Output folder (/tmp is always writable in Docker; fallback for local) --
+OUTPUT_DIR = (
+    pathlib.Path("/tmp")
+    if pathlib.Path("/tmp").exists()
+    else pathlib.Path(__file__).parent.parent.parent / "output"
+)
 OUTPUT_DIR.mkdir(exist_ok=True)
+
+FONT_NAME = "Times New Roman"
 
 mcp = FastMCP("Question Paper Generator")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# TOOL 1 – Generate Markdown question paper
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Helper: build a reference .docx that controls how the paper looks in Word
+# ---------------------------------------------------------------------------
+def _set_font(style, size: int, bold: bool | None = None) -> None:
+    """Force a font on a style and strip theme fonts/colors that override it."""
+    style.font.name = FONT_NAME
+    style.font.size = Pt(size)
+    style.font.color.rgb = RGBColor(0, 0, 0)
+    if bold is not None:
+        style.font.bold = bold
+
+    rfonts = style.element.get_or_add_rPr().get_or_add_rFonts()
+    for attr in ("w:ascii", "w:hAnsi", "w:eastAsia", "w:cs"):
+        rfonts.set(qn(attr), FONT_NAME)
+    for attr in ("w:asciiTheme", "w:hAnsiTheme", "w:eastAsiaTheme", "w:cstheme"):
+        if rfonts.get(qn(attr)) is not None:
+            del rfonts.attrib[qn(attr)]
+
+
+def _build_reference_docx() -> pathlib.Path:
+    """Create a pandoc reference.docx with exam-paper styling."""
+    ref_path = OUTPUT_DIR / "qp_reference.docx"
+
+    # Start from pandoc's own default reference so all its styles exist
+    with open(ref_path, "wb") as f:
+        subprocess.run(
+            [pypandoc.get_pandoc_path(), "--print-default-data-file", "reference.docx"],
+            stdout=f,
+            check=True,
+        )
+
+    doc = Document(str(ref_path))
+    styles = doc.styles
+
+    # Body text styles pandoc uses
+    for name in ("Normal", "Body Text", "First Paragraph", "Compact"):
+        if name in [s.name for s in styles]:
+            _set_font(styles[name], 11)
+            styles[name].paragraph_format.space_after = Pt(6)
+
+    # Section headings (### in markdown): black, bold, centered
+    if "Heading 3" in [s.name for s in styles]:
+        h3 = styles["Heading 3"]
+        _set_font(h3, 13, bold=True)
+        h3.font.italic = False
+        h3.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        h3.paragraph_format.space_before = Pt(14)
+        h3.paragraph_format.space_after = Pt(4)
+
+    # Custom styles used by the markdown (matched by name)
+    uni = styles.add_style("QPUniversity", WD_STYLE_TYPE.PARAGRAPH)
+    uni.base_style = styles["Normal"]
+    _set_font(uni, 16, bold=True)
+    uni.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    uni.paragraph_format.space_after = Pt(4)
+
+    ctr = styles.add_style("QPCenter", WD_STYLE_TYPE.PARAGRAPH)
+    ctr.base_style = styles["Normal"]
+    _set_font(ctr, 12)
+    ctr.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    ctr.paragraph_format.space_after = Pt(2)
+
+    doc.save(str(ref_path))
+    return ref_path
+
+
+# ---------------------------------------------------------------------------
+# TOOL 1 - Generate Markdown question paper
+# ---------------------------------------------------------------------------
 @mcp.tool()
 def generate_question_paper(
     university_name: str,
@@ -89,55 +167,75 @@ def generate_question_paper(
     """
     lines: list[str] = []
 
-    # ── Header ────────────────────────────────────────────────────────────────
-    header = f"""| | | |
-| :--- | :---: | ---: |
-| **Time: {duration}** | **{university_name}** | **Max Marks: {total_marks}** |
-| | **{exam_title}** | |
-| | **{course} - {semester}** | |
-| | **{subject_name} ({subject_code})** | |
-"""
-    lines.append(header.strip())
-    lines.append("")
+    # --- Title block (centered via custom styles in the reference docx) ----
+    lines += [
+        '::: {custom-style="QPUniversity"}',
+        university_name.upper(),
+        ":::",
+        "",
+        '::: {custom-style="QPCenter"}',
+        f"**{exam_title}**",
+        "",
+        f"{course}, {semester}",
+        "",
+        f"**{subject_name} ({subject_code})**",
+        "",
+        f"Date: {exam_date}",
+        ":::",
+        "",
+    ]
 
-    # ── General Instructions ──────────────────────────────────────────────────
+    # --- Time (left) and Max Marks (right) on one full-width row -----------
+    # The long separator line makes pandoc use the dash counts as relative
+    # column widths, so the table spans the full page width.
+    sep_left = ":" + "-" * 45
+    sep_right = "-" * 45 + ":"
+    lines += [
+        "| | |",
+        f"|{sep_left}|{sep_right}|",
+        f"| **Time: {duration}** | **Max Marks: {total_marks}** |",
+        "",
+        "---",
+        "",
+    ]
+
+    # --- General Instructions ----------------------------------------------
     if instructions:
-        lines += [
-            "### General Instructions",
-            "",
-        ]
+        lines += ["**General Instructions:**", ""]
         for i, inst in enumerate(instructions, 1):
             lines.append(f"{i}. {inst}")
-        lines += ["", "---", ""]
+        lines += [""]
 
-    # ── Sections ──────────────────────────────────────────────────────────────
+    # --- Sections ------------------------------------------------------------
     for sec in sections:
         title = sec.get("section_title", "Section")
         sec_marks = sec.get("section_marks", "")
         attempt_info = sec.get("attempt_info", "")
         questions: list[str] = sec.get("questions", [])
 
-        lines += [
-            f"### {title}",
-            "",
-        ]
+        lines += [f"### {title}", ""]
+
+        note_parts = []
         if attempt_info:
-            lines.append(f"*{attempt_info}*")
-            lines.append("")
+            note_parts.append(attempt_info.rstrip("."))
         if sec_marks:
-            lines.append(f"*(Each question carries {sec_marks} marks)*")
-            lines.append("")
+            note_parts.append(f"Each question carries {sec_marks} marks")
+        if note_parts:
+            lines += [
+                '::: {custom-style="QPCenter"}',
+                f"*({'. '.join(note_parts)}.)*",
+                ":::",
+                "",
+            ]
 
         for q_num, question in enumerate(questions, 1):
             marks_suffix = f" **[{sec_marks}]**" if sec_marks else ""
             lines.append(f"{q_num}. {question}{marks_suffix}")
             lines.append("")
 
-        lines += ["---", ""]
-
     md_content = "\n".join(lines)
 
-    # ── Save file ─────────────────────────────────────────────────────────────
+    # --- Save file -----------------------------------------------------------
     safe_subject = subject_name.replace(" ", "_").replace("/", "-")
     md_path = OUTPUT_DIR / f"{safe_subject}_question_paper.md"
     md_path.write_text(md_content, encoding="utf-8")
@@ -145,9 +243,9 @@ def generate_question_paper(
     return str(md_path)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# TOOL 2 – Convert Markdown → DOCX and email it
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# TOOL 2 - Convert Markdown to DOCX and email it
+# ---------------------------------------------------------------------------
 @mcp.tool()
 def send_email(
     markdown_file_path: str,
@@ -179,7 +277,10 @@ def send_email(
         gmail_password = os.environ["GMAIL_APP_PASSWORD"]
     except KeyError as e:
         logger.exception("Missing email credentials")
-        raise RuntimeError("Missing email credentials: ensure GMAIL_ADDRESS and GMAIL_APP_PASSWORD are set in environment") from e
+        raise RuntimeError(
+            "Missing email credentials: ensure GMAIL_ADDRESS and "
+            "GMAIL_APP_PASSWORD are set in environment"
+        ) from e
 
     md_path = pathlib.Path(markdown_file_path)
     if not md_path.exists():
@@ -188,15 +289,22 @@ def send_email(
     if not recipients:
         raise ValueError("No recipients provided.")
 
-    # ── Convert .md → .docx via pypandoc ──────────────────────────────────────
+    # --- Convert .md to .docx using the styled reference document ----------
     docx_path = md_path.with_suffix(".docx")
     try:
-        pypandoc.convert_file(str(md_path), "docx", outputfile=str(docx_path))
+        ref_docx = _build_reference_docx()
+        pypandoc.convert_file(
+            str(md_path),
+            "docx",
+            format="markdown",
+            outputfile=str(docx_path),
+            extra_args=[f"--reference-doc={ref_docx}"],
+        )
     except Exception as e:
         logger.exception("Failed to convert Markdown to DOCX")
         raise RuntimeError(f"DOCX conversion failed: {e}") from e
 
-    # ── Build and send email ──────────────────────────────────────────────────
+    # --- Build and send email ------------------------------------------------
     try:
         msg = MIMEMultipart()
         msg["From"] = gmail_address
@@ -224,9 +332,9 @@ def send_email(
     return f"Email sent successfully to: {', '.join(recipients)}"
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 # Entry point
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 def main() -> None:
     mcp.run()
 
