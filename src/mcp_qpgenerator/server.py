@@ -28,6 +28,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Inches, Mm, Pt, RGBColor
+from pydantic import Field
 from fastmcp import FastMCP
 
 # --- Logging ---------------------------------------------------------------
@@ -417,7 +418,14 @@ async def generate_question_paper(
     # Non-blocking file write
     await asyncio.to_thread(md_path.write_text, md_content, encoding="utf-8")
 
-    return str(md_path)
+    return (
+        f"Question paper generated successfully and stored temporarily at:\n{md_path}\n\n"
+        "NEXT STEPS FOR AGENT (SAFETY PROTOCOL):\n"
+        "1. Present the generated markdown preview to the user in chat for review.\n"
+        "2. Ask the user if any edits (questions, marks, duration, etc.) are needed.\n"
+        "3. Ask the user for explicit confirmation to email the paper and request the target recipient email addresses.\n"
+        "4. DO NOT invoke `send_email` until the user has explicitly confirmed the content and recipients (setting user_confirmed=True)."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -493,10 +501,26 @@ def _convert_and_send_email_sync(
 # ---------------------------------------------------------------------------
 @mcp.tool()
 async def send_email(
-    markdown_file_path: str,
-    recipients: list[str],
-    subject: str = "Question Paper",
-    body: str = "Please find the attached question paper.",
+    markdown_file_path: str = Field(
+        ...,
+        description="Absolute path to the temporary .md file produced by generate_question_paper.",
+    ),
+    recipients: list[str] = Field(
+        ...,
+        description="Explicit list of recipient email addresses. CRITICAL: The AI agent MUST NOT guess or auto-fill email addresses without asking the user directly in chat.",
+    ),
+    subject: str = Field(
+        default="Question Paper",
+        description="Email subject line. MUST be explicitly confirmed by the user or default to 'Question Paper'.",
+    ),
+    body: str = Field(
+        default="Please find the attached question paper.",
+        description="Plain-text body of the email.",
+    ),
+    user_confirmed: bool = Field(
+        default=False,
+        description="Mandatory security confirmation flag. MUST only be set to True after the user has explicitly reviewed the preview and granted permission to dispatch the email. Never set to True autonomously.",
+    ),
 ) -> str:
     """
     Convert the Markdown question paper to DOCX, email it to recipients, and delete temporary files.
@@ -505,6 +529,7 @@ async def send_email(
     - Never assume recipient emails automatically.
     - Always ask the user for confirmation and explicit recipient emails before calling this tool.
     - Ensure the user has reviewed the generated paper content.
+    - Set user_confirmed=True ONLY if the user has provided explicit verbal confirmation.
 
     Parameters
     ----------
@@ -516,12 +541,20 @@ async def send_email(
         Email subject line.
     body : str
         Plain-text body of the email.
+    user_confirmed : bool
+        Security confirmation flag (must be True to proceed).
 
     Returns
     -------
     str
         A success message listing all recipients the email was sent to.
     """
+    if user_confirmed is not True:
+        raise ValueError(
+            "Email dispatch rejected: User confirmation has not been explicitly granted. "
+            "You must present the preview to the user and obtain their confirmation before setting user_confirmed=True."
+        )
+
     if not recipients:
         raise ValueError("No recipients provided. Please confirm the recipient email address with the user.")
 
